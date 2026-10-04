@@ -1,13 +1,12 @@
 # Smooth Q4 Remote
 
-Aplicativo Android em Kotlin para operar a câmera do próprio celular e testar o controle manual de pan/tilt do Zhiyun Smooth Q4 por Bluetooth LE.
+Aplicativo Android em Kotlin dedicado ao controle manual de pan/tilt do Zhiyun Smooth Q4 por Bluetooth LE.
 
 ## O que está incluído
 
 - Busca e conexão BLE com dispositivos próximos.
 - Joystick virtual com velocidade ajustável; ao soltar, envia comandos neutros.
-- Prévia da câmera traseira do celular, zoom digital/óptico conforme os recursos do aparelho e captura de foto.
-- Fotos salvas em `Pictures/SmoothQ4Remote`.
+- Tela dedicada ao joystick, com o controle de sensibilidade sempre visível.
 - GitHub Actions para compilar e disponibilizar o APK de depuração como artefato.
 
 ## Compatibilidade do controle
@@ -16,7 +15,7 @@ Este é um protótipo. A análise estática do APK ZY Play 2.13.7 encontrou UUID
 
 Teste com espaço livre ao redor do gimbal e com o telefone firmemente preso. Feche o ZY Play antes de conectar este aplicativo. Não use o movimento experimental perto de pessoas ou objetos frágeis. Para tornar o controle confiável, o próximo passo é observar/validar os pacotes enviados pelo ZY Play ao Smooth Q4 e ajustar `SmoothQ4Protocol.kt` com testes e uma prova no aparelho.
 
-O app não implementa rastreamento automático de objetos nesta versão. A câmera e as fotos usam a câmera normal do telefone através do CameraX; os botões físicos e recursos proprietários de gravação do ZY Play não estão incluídos.
+O app não implementa rastreamento automático de objetos nem controla a câmera do telefone nesta versão. Ele serve somente como controle Bluetooth do gimbal.
 
 ## Gerar o APK pelo GitHub
 
@@ -24,7 +23,7 @@ O app não implementa rastreamento automático de objetos nesta versão. A câme
 2. Abra a aba **Actions** e habilite os workflows, se o GitHub solicitar.
 3. Faça um `push`, abra a execução **Build Android APK** e aguarde o job ficar verde.
 4. Baixe o artefato `smoothq4-remote-debug` no fim da página da execução. O APK dentro dele é `app-debug.apk`.
-5. Instale no Android e conceda as permissões de câmera e Bluetooth solicitadas.
+5. Instale no Android e conceda a permissão de Bluetooth solicitada.
 
 A mesma automação roda em cada `push` e pull request. O workflow usa Gradle 8.9, JDK 17 e Android SDK; não é necessário enviar o APK original do ZY Play para compilar este projeto.
 

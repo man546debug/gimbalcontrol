@@ -20,6 +20,8 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 class SmoothQ4BleClient(context: Context, private val listener: Listener) {
+    private data class PendingWrite(val packet: ByteArray, val retries: Int = 0)
+
     interface Listener {
         fun onStatus(message: String)
         fun onDevicesFound(devices: List<BluetoothDevice>)
@@ -37,6 +39,12 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     private var notifyCharacteristic: BluetoothGattCharacteristic? = null
     private val sequence = AtomicInteger(0)
     private val found = LinkedHashMap<String, BluetoothDevice>()
+    private val writeQueue = java.util.ArrayDeque<PendingWrite>()
+    private var writeDrainScheduled = false
+    private val writeDrainRunnable = Runnable {
+        writeDrainScheduled = false
+        writeNextPacket()
+    }
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -98,28 +106,14 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
 
     @SuppressLint("MissingPermission")
     fun sendAxis(command: Int, value: Float, speed: Int = 24) {
-        val characteristic = writeCharacteristic ?: return
-        val connection = gatt ?: return
+        if (writeCharacteristic == null || gatt == null) return
         val packet = SmoothQ4Protocol.encodeMove(command, value, speed, sequence.getAndIncrement())
-        try {
-            if (Build.VERSION.SDK_INT >= 33) {
-                val result = connection.writeCharacteristic(
-                    characteristic,
-                    packet,
-                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                )
-                if (result != BluetoothGatt.GATT_SUCCESS) status("BLE recusou o comando ($result).")
-            } else {
-                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                characteristic.value = packet
-                if (!connection.writeCharacteristic(characteristic)) status("Não foi possível enviar o comando BLE.")
-            }
-        } catch (_: SecurityException) {
-            status("Permissão Bluetooth removida; reconecte o gimbal.")
-        }
+        synchronized(writeQueue) { writeQueue.addLast(PendingWrite(packet)) }
+        scheduleWriteDrain()
     }
 
     fun stopMotion() {
+        synchronized(writeQueue) { writeQueue.clear() }
         sendAxis(SmoothQ4Protocol.PAN, 0f, 1)
         sendAxis(SmoothQ4Protocol.TILT, 0f, 1)
     }
@@ -128,16 +122,85 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
 
     @SuppressLint("MissingPermission")
     fun disconnect(sendStop: Boolean = true) {
-        if (sendStop) stopMotion()
+        if (sendStop && isReady()) {
+            stopMotion()
+            val closingGatt = gatt
+            mainHandler.postDelayed({ closeGatt(closingGatt) }, WRITE_INTERVAL_MS * 3)
+            return
+        }
         stopScan()
+        mainHandler.removeCallbacks(writeDrainRunnable)
+        writeDrainScheduled = false
+        synchronized(writeQueue) { writeQueue.clear() }
+        closeGatt(gatt)
+    }
+
+    private fun scheduleWriteDrain(delayMs: Long = WRITE_INTERVAL_MS) {
+        if (writeDrainScheduled) return
+        writeDrainScheduled = true
+        mainHandler.postDelayed(writeDrainRunnable, delayMs)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun writeNextPacket() {
+        val command = synchronized(writeQueue) {
+            if (writeQueue.isEmpty()) null else writeQueue.removeFirst()
+        } ?: return
+        val connection = gatt
+        val characteristic = writeCharacteristic
+        if (connection == null || characteristic == null) {
+            synchronized(writeQueue) { writeQueue.clear() }
+            return
+        }
         try {
-            gatt?.disconnect()
-            gatt?.close()
+            if (Build.VERSION.SDK_INT >= 33) {
+                val result = connection.writeCharacteristic(
+                    characteristic,
+                    command.packet,
+                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                )
+                if (result != BluetoothGatt.GATT_SUCCESS) {
+                    retryOrReport(command, "BLE recusou um comando ($result).")
+                    return
+                }
+            } else {
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                characteristic.value = command.packet
+                if (!connection.writeCharacteristic(characteristic)) {
+                    retryOrReport(command, "BLE recusou um comando.")
+                    return
+                }
+            }
+        } catch (_: SecurityException) {
+            retryOrReport(command, "Permissão Bluetooth removida; reconecte o gimbal.")
+            return
+        }
+        if (synchronized(writeQueue) { writeQueue.isNotEmpty() }) scheduleWriteDrain()
+    }
+
+    private fun retryOrReport(command: PendingWrite, message: String) {
+        if (command.retries < MAX_WRITE_RETRIES && isReady()) {
+            synchronized(writeQueue) { writeQueue.addFirst(command.copy(retries = command.retries + 1)) }
+            scheduleWriteDrain(WRITE_RETRY_INTERVAL_MS)
+        } else {
+            status(message)
+            if (synchronized(writeQueue) { writeQueue.isNotEmpty() }) scheduleWriteDrain()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun closeGatt(connection: BluetoothGatt?) {
+        if (connection == null) return
+        try {
+            connection.disconnect()
+            connection.close()
         } catch (_: SecurityException) {
         }
-        gatt = null
-        writeCharacteristic = null
-        notifyCharacteristic = null
+        if (gatt === connection) {
+            gatt = null
+            writeCharacteristic = null
+            notifyCharacteristic = null
+        }
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -223,6 +286,9 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     private fun status(message: String) = mainHandler.post { listener.onStatus(message) }
 
     companion object {
+        private const val WRITE_INTERVAL_MS = 30L
+        private const val WRITE_RETRY_INTERVAL_MS = 60L
+        private const val MAX_WRITE_RETRIES = 4
         private val CLIENT_CONFIGURATION = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }

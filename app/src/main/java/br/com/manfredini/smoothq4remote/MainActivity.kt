@@ -1,93 +1,79 @@
 package br.com.manfredini.smoothq4remote
 
 import android.Manifest
-import android.content.ContentValues
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.MediaStore
 import android.view.Gravity
-import android.view.View
-import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
-import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.view.LifecycleCameraController
-import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private lateinit var ble: SmoothQ4BleClient
     private lateinit var statusView: TextView
-    private lateinit var cameraController: LifecycleCameraController
-    private lateinit var cameraExecutor: ExecutorService
-    private lateinit var zoomBar: SeekBar
+    private lateinit var sensitivityValue: TextView
     private lateinit var deviceAdapter: ArrayAdapter<String>
     private val devices = mutableListOf<android.bluetooth.BluetoothDevice>()
     private val deviceLabels = mutableListOf<String>()
     private var deviceDialog: AlertDialog? = null
-    private var cameraReady = false
     private var joyX = 0f
     private var joyY = 0f
-    private var sensitivity = 0.45f
+    private var sensitivity = DEFAULT_SENSITIVITY
     private var motionLoopActive = false
-    private var sequenceLastValue = 0f
+    private var panWasActive = false
+    private var tiltWasActive = false
     private val handler = Handler(Looper.getMainLooper())
     private val motionRunnable = object : Runnable {
         override fun run() {
             if (!motionLoopActive) return
             if (ble.isReady()) {
-                val pan = if (abs(joyX) < DEAD_ZONE) 0f else joyX * sensitivity
-                val tilt = if (abs(joyY) < DEAD_ZONE) 0f else -joyY * sensitivity
-                ble.sendAxis(SmoothQ4Protocol.PAN, pan, speedFromInput(pan))
-                ble.sendAxis(SmoothQ4Protocol.TILT, tilt, speedFromInput(tilt))
+                val pan = axisInput(joyX)
+                // JoystickView reports screen coordinates: positive Y is downward.
+                val tilt = axisInput(joyY)
+
+                if (abs(pan) >= DEAD_ZONE) {
+                    ble.sendAxis(SmoothQ4Protocol.PAN, pan, speedFromInput(pan))
+                    panWasActive = true
+                } else if (panWasActive) {
+                    ble.sendAxis(SmoothQ4Protocol.PAN, 0f, 8)
+                    panWasActive = false
+                }
+
+                if (abs(tilt) >= DEAD_ZONE) {
+                    ble.sendAxis(SmoothQ4Protocol.TILT, tilt, speedFromInput(tilt))
+                    tiltWasActive = true
+                } else if (tiltWasActive) {
+                    ble.sendAxis(SmoothQ4Protocol.TILT, 0f, 8)
+                    tiltWasActive = false
+                }
             }
             handler.postDelayed(this, JOYSTICK_PERIOD_MS)
         }
-    }
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        val cameraGranted = grants[Manifest.permission.CAMERA] == true || hasPermission(Manifest.permission.CAMERA)
-        if (cameraGranted) startCamera()
-        if (hasBlePermissions()) ble.startScan()
-        if (!cameraGranted) showStatus("A permissão da câmera é necessária para a pré-visualização e as fotos.")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = 0xFF101820.toInt()
         window.navigationBarColor = 0xFF101820.toInt()
-        cameraExecutor = Executors.newSingleThreadExecutor()
         ble = SmoothQ4BleClient(this, this)
         buildInterface()
-        requestMissingPermissions()
+        requestBlePermissions()
     }
 
     private fun buildInterface() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF101820.toInt())
-            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setPadding(dp(16), dp(10), dp(16), dp(12))
         }
 
         val header = LinearLayout(this).apply {
@@ -95,73 +81,40 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             gravity = Gravity.CENTER_VERTICAL
         }
         val title = TextView(this).apply {
-            text = "SMOOTH Q4 REMOTE"
-            textSize = 17f
+            text = "SMOOTH Q4"
+            textSize = 20f
             setTextColor(0xFFFFFFFF.toInt())
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
-        header.addView(title, LinearLayout.LayoutParams(0, dp(42), 1f))
+        header.addView(title, LinearLayout.LayoutParams(0, dp(48), 1f))
         val connectButton = button("Conectar")
         connectButton.setOnClickListener { openDevicePicker() }
-        header.addView(connectButton)
-        val disconnectButton = button("Parar")
+        header.addView(connectButton, LinearLayout.LayoutParams(dp(112), dp(46)))
+        val disconnectButton = button("Desconectar")
         disconnectButton.setOnClickListener {
-            joyX = 0f
-            joyY = 0f
-            motionLoopActive = false
-            handler.removeCallbacks(motionRunnable)
-            if (ble.isReady()) ble.stopMotion()
-            ble.disconnect(sendStop = false)
-            showStatus("Movimento parado; gimbal desconectado.")
+            stopJoystick()
+            ble.disconnect(sendStop = true)
+            showStatus("Desconectado.")
         }
-        header.addView(disconnectButton, LinearLayout.LayoutParams(dp(72), dp(42)).apply { leftMargin = dp(6) })
+        header.addView(disconnectButton, LinearLayout.LayoutParams(dp(122), dp(46)).apply {
+            leftMargin = dp(8)
+        })
         root.addView(header)
 
         statusView = TextView(this).apply {
-            text = "Pronto. Conecte o Smooth Q4."
-            textSize = 12f
+            text = "Conecte o gimbal para começar."
+            textSize = 13f
             setTextColor(0xFFB8C7D1.toInt())
-            setPadding(dp(2), dp(3), dp(2), dp(7))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(2), dp(2), dp(2))
         }
-        root.addView(statusView)
+        root.addView(statusView, LinearLayout.LayoutParams(-1, dp(38)))
 
-        val preview = PreviewView(this).apply {
-            scaleType = PreviewView.ScaleType.FILL_CENTER
-            setBackgroundColor(0xFF000000.toInt())
-        }
-        root.addView(preview, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f).apply {
-            bottomMargin = dp(8)
-        })
+        root.addView(label("Arraste o controle para mover pan (esquerda/direita) e tilt (cima/baixo). Solte para parar.").apply {
+            gravity = Gravity.CENTER
+            textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+        }, LinearLayout.LayoutParams(-1, dp(48)))
 
-        cameraController = LifecycleCameraController(this).apply {
-            cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-            imageCaptureMode = ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
-        }
-        preview.controller = cameraController
-
-        val zoomRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        zoomRow.addView(label("Zoom"), LinearLayout.LayoutParams(dp(45), dp(40)))
-        zoomBar = SeekBar(this).apply {
-            max = 100
-            progress = 0
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    if (!fromUser || !cameraReady) return
-                    val maxZoom = cameraController.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1f
-                    val ratio = 1f + (maxZoom - 1f) * progress / 100f
-                    cameraController.setZoomRatio(ratio)
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-            })
-        }
-        zoomRow.addView(zoomBar, LinearLayout.LayoutParams(0, dp(40), 1f))
-        val photoButton = button("FOTO")
-        photoButton.setOnClickListener { takePhoto() }
-        zoomRow.addView(photoButton, LinearLayout.LayoutParams(dp(86), dp(44)).apply { leftMargin = dp(8) })
-        root.addView(zoomRow)
-
-        root.addView(label("Arraste para mover pan e tilt. Solte para parar."), LinearLayout.LayoutParams(-1, dp(27)))
         val joystick = JoystickView(this).apply {
             listener = JoystickView.Listener { x, y, released ->
                 joyX = x
@@ -174,29 +127,44 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 }
             }
         }
-        root.addView(joystick, LinearLayout.LayoutParams(-1, dp(190)))
+        root.addView(joystick, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+            topMargin = dp(4)
+            bottomMargin = dp(8)
+        })
 
-        val sensitivityRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        sensitivityRow.addView(label("Sensibilidade"), LinearLayout.LayoutParams(dp(100), dp(38)))
+        val sensitivityHeader = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        sensitivityHeader.addView(label("Sensibilidade"), LinearLayout.LayoutParams(0, dp(30), 1f))
+        sensitivityValue = label("${(sensitivity * 100).toInt()}%").apply {
+            textSize = 15f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+        sensitivityHeader.addView(sensitivityValue, LinearLayout.LayoutParams(dp(56), dp(30)))
+        root.addView(sensitivityHeader)
+
         val sensitivityBar = SeekBar(this).apply {
             max = 100
-            progress = 45
+            progress = (DEFAULT_SENSITIVITY * 100).toInt()
+            contentDescription = "Sensibilidade do joystick"
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    sensitivity = 0.15f + (progress / 100f) * 0.65f
+                    sensitivity = progress.coerceAtLeast(MIN_SENSITIVITY_PERCENT) / 100f
+                    sensitivityValue.text = "${(sensitivity * 100).toInt()}%"
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             })
         }
-        sensitivityRow.addView(sensitivityBar, LinearLayout.LayoutParams(0, dp(38), 1f))
-        root.addView(sensitivityRow)
+        root.addView(sensitivityBar, LinearLayout.LayoutParams(-1, dp(54)))
+
         setContentView(root)
     }
 
     private fun openDevicePicker() {
         if (!hasBlePermissions()) {
-            requestMissingPermissions()
+            requestBlePermissions()
             return
         }
         devices.clear()
@@ -213,17 +181,26 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         ble.startScan()
     }
 
-    private fun requestMissingPermissions() {
-        val required = mutableListOf(Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            required += Manifest.permission.BLUETOOTH_SCAN
-            required += Manifest.permission.BLUETOOTH_CONNECT
+    private fun requestBlePermissions() {
+        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else {
-            required += Manifest.permission.ACCESS_FINE_LOCATION
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) required += Manifest.permission.WRITE_EXTERNAL_STORAGE
-        val missing = required.distinct().filterNot(::hasPermission)
-        if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray()) else startCamera()
+        val missing = required.filterNot(::hasPermission)
+        if (missing.isNotEmpty()) {
+            requestPermissions(missing.toTypedArray(), BLE_PERMISSION_REQUEST)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != BLE_PERMISSION_REQUEST) return
+        if (hasBlePermissions()) {
+            showStatus("Permissão pronta. Toque em Conectar.")
+        } else {
+            showStatus("Permita o Bluetooth para localizar o Smooth Q4.")
+        }
     }
 
     private fun hasBlePermissions(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -233,58 +210,17 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private fun hasPermission(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
-    private fun startCamera() {
-        if (!hasPermission(Manifest.permission.CAMERA)) return
-        try {
-            cameraController.bindToLifecycle(this)
-            cameraReady = true
-            showStatus("Câmera pronta. Conecte o Smooth Q4 para habilitar o movimento.")
-        } catch (error: Exception) {
-            showStatus("Não foi possível abrir a câmera: ${error.message ?: "erro desconhecido"}")
-        }
-    }
-
-    private fun takePhoto() {
-        if (!cameraReady) {
-            Toast.makeText(this, "A câmera ainda não está pronta.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val name = "SmoothQ4_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, name)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/SmoothQ4Remote")
-                put(MediaStore.Images.Media.IS_PENDING, 1)
-            }
-        }
-        val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-        if (uri == null) {
-            showStatus("Não consegui criar o arquivo da foto.")
-            return
-        }
-        val options = ImageCapture.OutputFileOptions.Builder(contentResolver, uri, values).build()
-        cameraController.takePicture(options, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
-            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    contentResolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
-                }
-                runOnUiThread { showStatus("Foto salva em Pictures/SmoothQ4Remote.") }
-            }
-
-            override fun onError(exception: ImageCaptureException) {
-                contentResolver.delete(uri, null, null)
-                runOnUiThread { showStatus("Falha ao tirar foto: ${exception.message}") }
-            }
-        })
-    }
+    private fun axisInput(value: Float): Float =
+        if (abs(value) < DEAD_ZONE) 0f else value.coerceIn(-1f, 1f) * sensitivity
 
     private fun stopJoystick() {
         joyX = 0f
         joyY = 0f
-        if (motionLoopActive) {
+        if (motionLoopActive || panWasActive || tiltWasActive) {
             motionLoopActive = false
             handler.removeCallbacks(motionRunnable)
+            panWasActive = false
+            tiltWasActive = false
             if (ble.isReady()) ble.stopMotion()
         }
     }
@@ -306,12 +242,11 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
 
     override fun onReady() {
         deviceDialog?.dismiss()
-        showStatus("Conectado. O protocolo de movimento precisa ser validado no Smooth Q4.")
+        showStatus("Conectado. Movimento nos eixos em teste.")
     }
 
     override fun onPacketReceived(bytes: ByteArray) {
-        val hex = bytes.joinToString(" ") { "%02X".format(it) }
-        showStatus("BLE recebido: $hex")
+        if (bytes.isNotEmpty()) showStatus("Resposta do gimbal recebida por Bluetooth.")
     }
 
     private fun showStatus(message: String) {
@@ -321,14 +256,14 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private fun button(text: String) = Button(this).apply {
         this.text = text
         isAllCaps = false
-        minHeight = dp(42)
+        minHeight = dp(44)
         setTextColor(0xFFFFFFFF.toInt())
         setBackgroundColor(0xFF244254.toInt())
     }
 
     private fun label(text: String) = TextView(this).apply {
         this.text = text
-        textSize = 12f
+        textSize = 14f
         setTextColor(0xFFB8C7D1.toInt())
         gravity = Gravity.CENTER_VERTICAL
     }
@@ -343,12 +278,14 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     override fun onDestroy() {
         stopJoystick()
         if (::ble.isInitialized) ble.disconnect(sendStop = true)
-        if (::cameraExecutor.isInitialized) cameraExecutor.shutdown()
         super.onDestroy()
     }
 
     companion object {
         private const val DEAD_ZONE = 0.08f
+        private const val MIN_SENSITIVITY_PERCENT = 15
+        private const val DEFAULT_SENSITIVITY = 0.65f
         private const val JOYSTICK_PERIOD_MS = 100L
+        private const val BLE_PERMISSION_REQUEST = 2401
     }
 }
