@@ -12,7 +12,7 @@ class SmoothQ4ProtocolTest {
 
     @Test
     fun movementFrameMatchesCapturedZhiyunJoystickLayout() {
-        val packet = SmoothQ4Protocol.encodeRawMove(SmoothQ4Protocol.PAN, 0x0ED4, 0x32)
+        val packet = SmoothQ4Protocol.encodeRawMove(0x01, 0x0ED4, 0x32)
         assertEquals(14, packet.size)
         assertTrue(packet.contentEquals(
             byteArrayOf(
@@ -33,6 +33,12 @@ class SmoothQ4ProtocolTest {
         assertEquals(SmoothQ4Protocol.CENTER, unsignedShort(center, 10))
         assertTrue(unsignedShort(negative, 10) < SmoothQ4Protocol.CENTER)
         assertTrue(unsignedShort(positive, 10) > SmoothQ4Protocol.CENTER)
+    }
+
+    @Test
+    fun axisCommandsMatchObservedSmooth4Behavior() {
+        assertEquals(0x02, SmoothQ4Protocol.PAN)
+        assertEquals(0x01, SmoothQ4Protocol.TILT)
     }
 
     private fun unsignedShort(packet: ByteArray, offset: Int): Int =
