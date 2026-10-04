@@ -77,7 +77,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
             return
         }
         scanner?.startScan(scanCallback)
-        status("Procurando Smooth Q4 por até 12 segundos…")
+        status("Procurando Smooth 4 por até 12 segundos…")
         mainHandler.postDelayed(stopScanRunnable, 12_000)
     }
 
@@ -263,7 +263,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
                     }
                 }
             }
-            status("Canal BLE pronto. Protocolo de movimento ainda em teste no Smooth Q4.")
+            status("Canal BLE pronto. Protocolo de movimento ainda em teste no Smooth 4.")
             mainHandler.post { listener.onReady() }
         }
 
@@ -283,7 +283,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     }
 
     private fun safeName(device: BluetoothDevice): String = try {
-        device.name ?: "Smooth Q4 (${device.address})"
+        device.name ?: "Smooth 4 (${device.address})"
     } catch (_: SecurityException) {
         "Gimbal BLE"
     }
