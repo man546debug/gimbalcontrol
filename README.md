@@ -1,6 +1,6 @@
-# Smooth Q4 Remote
+# Smooth 4 Remote
 
-Aplicativo Android em Kotlin dedicado ao controle manual de pan/tilt do Zhiyun Smooth Q4 por Bluetooth LE.
+Aplicativo Android em Kotlin dedicado ao controle manual de pan/tilt do Zhiyun Smooth 4 por Bluetooth LE.
 
 ## O que está incluído
 
@@ -11,9 +11,9 @@ Aplicativo Android em Kotlin dedicado ao controle manual de pan/tilt do Zhiyun S
 
 ## Compatibilidade do controle
 
-Este é um protótipo. O formato dos quadros foi corrigido para seguir capturas públicas de comandos do Smooth 4: cada quadro contém o eixo, o modo `0x10`, o valor de 16 bits centrado em 2048 e o CRC-XMODEM. O app agora envia os quadros de pan e tilt em sequência, mantendo no centro o eixo sem movimento. Como essas capturas são de outro modelo, o formato e a escala ainda precisam ser confirmados no Smooth Q4 físico.
+Este é um protótipo. O formato dos quadros foi corrigido para seguir capturas públicas de comandos do Smooth 4: cada quadro contém o eixo, o modo `0x10`, o valor de 16 bits centrado em 2048 e o CRC-XMODEM. O app agora envia os quadros de pan e tilt em sequência, mantendo no centro o eixo sem movimento. A confirmação prática no gimbal mostrou que o comando `0x01` atua no tilt; esta versão associa `0x01` ao tilt e `0x02` ao pan, para que o eixo horizontal gire e o vertical incline.
 
-Os testes verificam o quadro contra uma captura publicada do Smooth 4 e conferem que os valores dos dois sentidos ficam em lados opostos do centro. A validação final depende de testar no Smooth Q4. Teste com espaço livre ao redor do gimbal e com o telefone firmemente preso. Feche o ZY Play antes de conectar este aplicativo.
+Os testes verificam o quadro contra uma captura publicada do Smooth 4 e conferem que os valores dos dois sentidos ficam em lados opostos do centro. A validação final desta troca depende do novo teste no Smooth 4. Teste com espaço livre ao redor do gimbal e com o telefone firmemente preso. Feche o ZY Play antes de conectar este aplicativo.
 
 O app não implementa rastreamento automático de objetos nem controla a câmera do telefone nesta versão. Ele serve somente como controle Bluetooth do gimbal.
 
