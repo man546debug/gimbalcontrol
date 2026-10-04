@@ -11,7 +11,7 @@ Aplicativo Android em Kotlin dedicado ao controle manual de pan/tilt do Zhiyun S
 
 ## Compatibilidade do controle
 
-Este é um protótipo. O formato dos quadros foi corrigido para seguir capturas públicas de comandos do Smooth 4: cada quadro contém o eixo, o modo `0x10`, o valor de 16 bits centrado em 2048 e o CRC-XMODEM. O app agora envia os quadros de pan e tilt em sequência, mantendo no centro o eixo sem movimento. A confirmação prática no gimbal mostrou que o comando `0x01` atua no tilt; esta versão associa `0x01` ao tilt e `0x02` ao pan, para que o eixo horizontal gire e o vertical incline.
+Este é um protótipo. O formato dos quadros foi corrigido para seguir capturas públicas de comandos do Smooth 4: cada quadro contém o eixo, o modo `0x10`, o valor de 16 bits centrado em 2048 e o CRC-XMODEM. O app envia primeiro o quadro `0x01` (tilt) e depois `0x02` (pan), mantendo no centro o eixo sem movimento. A confirmação prática no gimbal mostrou que o comando `0x01` atua no tilt; esta versão associa `0x01` ao tilt e `0x02` ao pan, para que o eixo horizontal gire e o vertical incline.
 
 Os testes verificam o quadro contra uma captura publicada do Smooth 4 e conferem que os valores dos dois sentidos ficam em lados opostos do centro. A validação final desta troca depende do novo teste no Smooth 4. Teste com espaço livre ao redor do gimbal e com o telefone firmemente preso. Feche o ZY Play antes de conectar este aplicativo.
 
