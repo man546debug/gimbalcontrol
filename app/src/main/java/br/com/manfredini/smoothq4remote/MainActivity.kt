@@ -29,8 +29,6 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private var joyY = 0f
     private var sensitivity = DEFAULT_SENSITIVITY
     private var motionLoopActive = false
-    private var panWasActive = false
-    private var tiltWasActive = false
     private val handler = Handler(Looper.getMainLooper())
     private val motionRunnable = object : Runnable {
         override fun run() {
@@ -39,22 +37,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 val pan = axisInput(joyX)
                 // JoystickView reports screen coordinates: positive Y is downward.
                 val tilt = axisInput(joyY)
-
-                if (abs(pan) >= DEAD_ZONE) {
-                    ble.sendAxis(SmoothQ4Protocol.PAN, pan, speedFromInput(pan))
-                    panWasActive = true
-                } else if (panWasActive) {
-                    ble.sendAxis(SmoothQ4Protocol.PAN, 0f, 8)
-                    panWasActive = false
-                }
-
-                if (abs(tilt) >= DEAD_ZONE) {
-                    ble.sendAxis(SmoothQ4Protocol.TILT, tilt, speedFromInput(tilt))
-                    tiltWasActive = true
-                } else if (tiltWasActive) {
-                    ble.sendAxis(SmoothQ4Protocol.TILT, 0f, 8)
-                    tiltWasActive = false
-                }
+                // Zhiyun joystick frames carry both axes; keep the inactive axis centered.
+                ble.sendAxes(pan, tilt)
             }
             handler.postDelayed(this, JOYSTICK_PERIOD_MS)
         }
@@ -216,16 +200,12 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private fun stopJoystick() {
         joyX = 0f
         joyY = 0f
-        if (motionLoopActive || panWasActive || tiltWasActive) {
+        if (motionLoopActive) {
             motionLoopActive = false
             handler.removeCallbacks(motionRunnable)
-            panWasActive = false
-            tiltWasActive = false
             if (ble.isReady()) ble.stopMotion()
         }
     }
-
-    private fun speedFromInput(value: Float): Int = (8 + abs(value) * 42).toInt().coerceIn(8, 50)
 
     override fun onStatus(message: String) = showStatus(message)
 
