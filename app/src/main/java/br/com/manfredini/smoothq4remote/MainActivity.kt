@@ -21,6 +21,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private lateinit var ble: SmoothQ4BleClient
     private lateinit var statusView: TextView
     private lateinit var sensitivityValue: TextView
+    private lateinit var panCommandButton: Button
+    private lateinit var panDirectionButton: Button
     private lateinit var deviceAdapter: ArrayAdapter<String>
     private val devices = mutableListOf<android.bluetooth.BluetoothDevice>()
     private val deviceLabels = mutableListOf<String>()
@@ -28,17 +30,20 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private var joyX = 0f
     private var joyY = 0f
     private var sensitivity = DEFAULT_SENSITIVITY
+    private var panCommand = SmoothQ4Protocol.PAN
+    private var panInverted = false
     private var motionLoopActive = false
     private val handler = Handler(Looper.getMainLooper())
     private val motionRunnable = object : Runnable {
         override fun run() {
             if (!motionLoopActive) return
             if (ble.isReady()) {
-                val pan = axisInput(joyX)
+                val panValue = axisInput(joyX)
+                val pan = if (panInverted) -panValue else panValue
                 // JoystickView reports screen coordinates: positive Y is downward.
                 val tilt = axisInput(joyY)
                 // Zhiyun joystick frames carry both axes; keep the inactive axis centered.
-                ble.sendAxes(pan, tilt)
+                ble.sendAxes(pan, tilt, panCommand)
             }
             handler.postDelayed(this, JOYSTICK_PERIOD_MS)
         }
@@ -98,6 +103,36 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             gravity = Gravity.CENTER
             textAlignment = TextView.TEXT_ALIGNMENT_CENTER
         }, LinearLayout.LayoutParams(-1, dp(48)))
+
+        val testControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        panCommandButton = button(panCommandLabel())
+        panCommandButton.setOnClickListener {
+            if (motionLoopActive) stopJoystick()
+            val previousCommand = panCommand
+            panCommand = if (panCommand == SmoothQ4Protocol.PAN) {
+                SmoothQ4Protocol.PAN_YAW_CANDIDATE
+            } else {
+                SmoothQ4Protocol.PAN
+            }
+            if (ble.isReady()) ble.sendAxes(0f, 0f, previousCommand)
+            panCommandButton.text = panCommandLabel()
+            showStatus("Comando horizontal selecionado: ${panCommand.toString(16).uppercase().padStart(2, '0')}.")
+        }
+        testControls.addView(panCommandButton, LinearLayout.LayoutParams(0, dp(44), 1f))
+        panDirectionButton = button(panDirectionLabel())
+        panDirectionButton.setOnClickListener {
+            panInverted = !panInverted
+            panDirectionButton.text = panDirectionLabel()
+        }
+        testControls.addView(panDirectionButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+            leftMargin = dp(8)
+        })
+        root.addView(testControls, LinearLayout.LayoutParams(-1, dp(48)).apply {
+            bottomMargin = dp(4)
+        })
 
         val joystick = JoystickView(this).apply {
             listener = JoystickView.Listener { x, y, released ->
@@ -232,6 +267,10 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private fun showStatus(message: String) {
         if (::statusView.isInitialized) statusView.text = message
     }
+
+    private fun panCommandLabel() = "Pan: 0x${panCommand.toString(16).uppercase().padStart(2, '0')}"
+
+    private fun panDirectionLabel() = if (panInverted) "Inverter pan: ligado" else "Inverter pan: desligado"
 
     private fun button(text: String) = Button(this).apply {
         this.text = text
