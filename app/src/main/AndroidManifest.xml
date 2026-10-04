@@ -8,7 +8,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Smooth Q4 Remote"
+        android:label="Smooth 4 Remote"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity
