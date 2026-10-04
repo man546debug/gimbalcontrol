@@ -16,6 +16,7 @@ object SmoothQ4Protocol {
 
     // On the tested Smooth 4, command 0x01 moves tilt and 0x02 moves pan.
     const val PAN = 0x02
+    const val PAN_YAW_CANDIDATE = 0x03
     const val TILT = 0x01
     const val CENTER = 2048
     private const val AXIS_RANGE = 1748
@@ -32,10 +33,18 @@ object SmoothQ4Protocol {
      * Firmware expects the pair in command order 0x01 then 0x02. On this
      * Smooth 4, 0x01 is tilt and 0x02 is pan.
      */
-    fun encodeAxes(pan: Float, tilt: Float, firstSequence: Int): List<ByteArray> = listOf(
+    fun encodeAxes(
+        pan: Float,
+        tilt: Float,
+        firstSequence: Int,
+        panCommand: Int = PAN
+    ): List<ByteArray> {
+        require(panCommand == PAN || panCommand == PAN_YAW_CANDIDATE)
+        return listOf(
         encodeMove(TILT, tilt, firstSequence),
-        encodeMove(PAN, pan, firstSequence + 1)
-    )
+        encodeMove(panCommand, pan, firstSequence + 1)
+        )
+    }
 
     internal fun encodeRawMove(command: Int, value: Int, sequence: Int): ByteArray {
         val packet = ByteArray(14)
