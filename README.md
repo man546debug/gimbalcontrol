@@ -5,15 +5,15 @@ Aplicativo Android em Kotlin dedicado ao controle manual de pan/tilt do Zhiyun S
 ## O que está incluído
 
 - Busca e conexão BLE com dispositivos próximos.
-- Joystick virtual com velocidade ajustável; ao soltar, envia comandos neutros.
+- Joystick virtual com sensibilidade ajustável; ao soltar, envia comandos neutros.
 - Tela dedicada ao joystick, com o controle de sensibilidade sempre visível.
 - GitHub Actions para compilar e disponibilizar o APK de depuração como artefato.
 
 ## Compatibilidade do controle
 
-Este é um protótipo. A análise estática do APK ZY Play 2.13.7 encontrou UUIDs BLE usados pelo ecossistema Zhiyun, mas não revelou o formato completo dos comandos. O codificador de movimento incluído usa um formato BTE publicado para outro modelo de gimbal Zhiyun como hipótese. Ainda não foi validado em um Smooth Q4 físico; portanto, a conexão BLE pode funcionar mesmo que o joystick não mova o gimbal ou os eixos/velocidade precisem de ajuste.
+Este é um protótipo. O formato dos quadros foi corrigido para seguir capturas públicas de comandos do Smooth 4: cada quadro contém o eixo, o modo `0x10`, o valor de 16 bits centrado em 2048 e o CRC-XMODEM. O app agora envia os quadros de pan e tilt em sequência, mantendo no centro o eixo sem movimento. Como essas capturas são de outro modelo, o formato e a escala ainda precisam ser confirmados no Smooth Q4 físico.
 
-Teste com espaço livre ao redor do gimbal e com o telefone firmemente preso. Feche o ZY Play antes de conectar este aplicativo. Não use o movimento experimental perto de pessoas ou objetos frágeis. Para tornar o controle confiável, o próximo passo é observar/validar os pacotes enviados pelo ZY Play ao Smooth Q4 e ajustar `SmoothQ4Protocol.kt` com testes e uma prova no aparelho.
+Os testes verificam o quadro contra uma captura publicada do Smooth 4 e conferem que os valores dos dois sentidos ficam em lados opostos do centro. A validação final depende de testar no Smooth Q4. Teste com espaço livre ao redor do gimbal e com o telefone firmemente preso. Feche o ZY Play antes de conectar este aplicativo.
 
 O app não implementa rastreamento automático de objetos nem controla a câmera do telefone nesta versão. Ele serve somente como controle Bluetooth do gimbal.
 
@@ -33,7 +33,7 @@ Abra a pasta do projeto no Android Studio com JDK 17. O Android Studio sincroniz
 
 ## Estrutura principal
 
-- `app/src/main/java/br/com/manfredini/smoothq4remote/MainActivity.kt`: câmera, foto, zoom, interface e ciclo do joystick.
+- `app/src/main/java/br/com/manfredini/smoothq4remote/MainActivity.kt`: interface e ciclo do joystick.
 - `app/src/main/java/br/com/manfredini/smoothq4remote/SmoothQ4BleClient.kt`: busca, conexão GATT e notificações.
 - `app/src/main/java/br/com/manfredini/smoothq4remote/SmoothQ4Protocol.kt`: UUIDs e codificador experimental dos comandos.
 - `.github/workflows/build-apk.yml`: compilação e upload do artefato no GitHub Actions.
