@@ -11,12 +11,30 @@ class SmoothQ4ProtocolTest {
     }
 
     @Test
-    fun movementFrameHasExpectedHeaderAndChecksumForItsPayload() {
-        val packet = SmoothQ4Protocol.encodeRawMove(0x02, 0x0010, 8, 1)
+    fun movementFrameMatchesCapturedZhiyunJoystickLayout() {
+        val packet = SmoothQ4Protocol.encodeRawMove(SmoothQ4Protocol.PAN, 0x0ED4, 0x32)
         assertEquals(14, packet.size)
-        assertTrue(packet.copyOfRange(0, 4).contentEquals(byteArrayOf(0x24, 0x3c, 0x08, 0x00)))
+        assertTrue(packet.contentEquals(
+            byteArrayOf(
+                0x24, 0x3c, 0x08, 0x00, 0x18, 0x12, 0x32, 0x01,
+                0x01, 0x10, 0xD4.toByte(), 0x0E, 0x91.toByte(), 0x77
+            )
+        ))
         val checksum = SmoothQ4Protocol.crc16Xmodem(packet, 4, 8)
         assertEquals(checksum and 0xff, packet[12].toInt() and 0xff)
         assertEquals((checksum ushr 8) and 0xff, packet[13].toInt() and 0xff)
     }
+
+    @Test
+    fun joystickCenterIsNeutralAndBothSignsStayOnOppositeSidesOfCenter() {
+        val center = SmoothQ4Protocol.encodeMove(SmoothQ4Protocol.TILT, 0f, 0)
+        val negative = SmoothQ4Protocol.encodeMove(SmoothQ4Protocol.TILT, -1f, 1)
+        val positive = SmoothQ4Protocol.encodeMove(SmoothQ4Protocol.TILT, 1f, 2)
+        assertEquals(SmoothQ4Protocol.CENTER, unsignedShort(center, 10))
+        assertTrue(unsignedShort(negative, 10) < SmoothQ4Protocol.CENTER)
+        assertTrue(unsignedShort(positive, 10) > SmoothQ4Protocol.CENTER)
+    }
+
+    private fun unsignedShort(packet: ByteArray, offset: Int): Int =
+        (packet[offset].toInt() and 0xff) or ((packet[offset + 1].toInt() and 0xff) shl 8)
 }
