@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             gravity = Gravity.CENTER_VERTICAL
         }
         val title = TextView(this).apply {
-            text = "SMOOTH Q4"
+            text = "SMOOTH 4"
             textSize = 20f
             setTextColor(0xFFFFFFFF.toInt())
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -183,7 +183,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         if (hasBlePermissions()) {
             showStatus("Permissão pronta. Toque em Conectar.")
         } else {
-            showStatus("Permita o Bluetooth para localizar o Smooth Q4.")
+            showStatus("Permita o Bluetooth para localizar o Smooth 4.")
         }
     }
 
