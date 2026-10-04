@@ -50,6 +50,14 @@ class SmoothQ4ProtocolTest {
         assertTrue(unsignedShort(packets[1], 10) > SmoothQ4Protocol.CENTER)
     }
 
+    @Test
+    fun horizontalCommandCanBeSwitchedBetweenCurrentAndYawCandidate() {
+        val current = SmoothQ4Protocol.encodeAxes(0.5f, 0f, 10, SmoothQ4Protocol.PAN)
+        val yawCandidate = SmoothQ4Protocol.encodeAxes(0.5f, 0f, 10, SmoothQ4Protocol.PAN_YAW_CANDIDATE)
+        assertEquals(0x02, current[1][8].toInt() and 0xff)
+        assertEquals(0x03, yawCandidate[1][8].toInt() and 0xff)
+    }
+
     private fun unsignedShort(packet: ByteArray, offset: Int): Int =
         (packet[offset].toInt() and 0xff) or ((packet[offset + 1].toInt() and 0xff) shl 8)
 }
