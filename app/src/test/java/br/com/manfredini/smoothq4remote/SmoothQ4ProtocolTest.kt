@@ -41,6 +41,15 @@ class SmoothQ4ProtocolTest {
         assertEquals(0x01, SmoothQ4Protocol.TILT)
     }
 
+    @Test
+    fun axisFramesAreSentInFirmwareCommandOrder() {
+        val packets = SmoothQ4Protocol.encodeAxes(pan = 0.5f, tilt = -0.5f, firstSequence = 10)
+        assertEquals(0x01, packets[0][8].toInt() and 0xff)
+        assertEquals(0x02, packets[1][8].toInt() and 0xff)
+        assertTrue(unsignedShort(packets[0], 10) < SmoothQ4Protocol.CENTER)
+        assertTrue(unsignedShort(packets[1], 10) > SmoothQ4Protocol.CENTER)
+    }
+
     private fun unsignedShort(packet: ByteArray, offset: Int): Int =
         (packet[offset].toInt() and 0xff) or ((packet[offset + 1].toInt() and 0xff) shl 8)
 }
