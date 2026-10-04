@@ -28,6 +28,15 @@ object SmoothQ4Protocol {
         return encodeRawMove(command, value, sequence)
     }
 
+    /**
+     * Firmware expects the pair in command order 0x01 then 0x02. On this
+     * Smooth 4, 0x01 is tilt and 0x02 is pan.
+     */
+    fun encodeAxes(pan: Float, tilt: Float, firstSequence: Int): List<ByteArray> = listOf(
+        encodeMove(TILT, tilt, firstSequence),
+        encodeMove(PAN, pan, firstSequence + 1)
+    )
+
     internal fun encodeRawMove(command: Int, value: Int, sequence: Int): ByteArray {
         val packet = ByteArray(14)
         packet[0] = 0x24
