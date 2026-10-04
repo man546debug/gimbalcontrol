@@ -7,15 +7,16 @@ import kotlin.math.roundToInt
  *
  * The UUIDs were found in the supplied ZY Play APK. The frame layout matches
  * captured Smooth 4 joystick frames: command, 0x10 mode byte,
- * 16-bit centered axis value, then CRC-XMODEM. Smooth Q4 compatibility still
- * needs confirmation on hardware.
+ * 16-bit centered axis value, then CRC-XMODEM. Axis IDs follow the observed
+ * Smooth 4 behavior on the user's gimbal.
  */
 object SmoothQ4Protocol {
     val writeCharacteristic = java.util.UUID.fromString("d44bc439-abfd-45a2-b575-925416129600")
     val notifyCharacteristic = java.util.UUID.fromString("d44bc439-abfd-45a2-b575-925416129601")
 
-    const val PAN = 0x01
-    const val TILT = 0x02
+    // On the tested Smooth 4, command 0x01 moves tilt and 0x02 moves pan.
+    const val PAN = 0x02
+    const val TILT = 0x01
     const val CENTER = 2048
     private const val AXIS_RANGE = 1748
     private const val AXIS_MODE = 0x10
