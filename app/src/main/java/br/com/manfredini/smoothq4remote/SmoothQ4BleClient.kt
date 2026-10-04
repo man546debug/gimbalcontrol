@@ -107,13 +107,9 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     @SuppressLint("MissingPermission")
     fun sendAxes(pan: Float, tilt: Float) {
         if (writeCharacteristic == null || gatt == null) return
+        val packets = SmoothQ4Protocol.encodeAxes(pan, tilt, sequence.getAndAdd(2))
         synchronized(writeQueue) {
-            writeQueue.addLast(
-                PendingWrite(SmoothQ4Protocol.encodeMove(SmoothQ4Protocol.PAN, pan, sequence.getAndIncrement()))
-            )
-            writeQueue.addLast(
-                PendingWrite(SmoothQ4Protocol.encodeMove(SmoothQ4Protocol.TILT, tilt, sequence.getAndIncrement()))
-            )
+            packets.forEach { writeQueue.addLast(PendingWrite(it)) }
         }
         scheduleWriteDrain()
     }
