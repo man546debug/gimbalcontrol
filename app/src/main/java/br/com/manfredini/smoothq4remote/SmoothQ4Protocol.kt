@@ -30,8 +30,9 @@ object SmoothQ4Protocol {
     }
 
     /**
-     * Firmware expects the pair in command order 0x01 then 0x02. On this
-     * Smooth 4, 0x01 is tilt and 0x02 is pan.
+     * Send all three axis frames in command order. The official ZY Play SDK
+     * drives pitch, roll, and yaw independently. Keep the unused axis centered
+     * while testing which command byte the Smooth 4 accepts for horizontal pan.
      */
     fun encodeAxes(
         pan: Float,
@@ -41,8 +42,9 @@ object SmoothQ4Protocol {
     ): List<ByteArray> {
         require(panCommand == PAN || panCommand == PAN_YAW_CANDIDATE)
         return listOf(
-        encodeMove(TILT, tilt, firstSequence),
-        encodeMove(panCommand, pan, firstSequence + 1)
+            encodeMove(TILT, tilt, firstSequence),
+            encodeMove(PAN, if (panCommand == PAN) pan else 0f, firstSequence + 1),
+            encodeMove(PAN_YAW_CANDIDATE, if (panCommand == PAN_YAW_CANDIDATE) pan else 0f, firstSequence + 2)
         )
     }
 
