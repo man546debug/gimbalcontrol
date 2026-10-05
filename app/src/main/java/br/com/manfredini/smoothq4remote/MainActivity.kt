@@ -143,6 +143,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         panDirectionButton.setOnClickListener {
             panInverted = !panInverted
             panDirectionButton.text = panDirectionLabel()
+            panDirectionButton.setBackgroundColor(if (panInverted) 0xFF176B70.toInt() else 0xFF244254.toInt())
+            showStatus(if (panInverted) "Pan invertido: esquerda e direita trocadas." else "Pan normal: sentido padrão.")
         }
         testControls.addView(panDirectionButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
             rightMargin = dp(4)
@@ -152,6 +154,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             if (!movementLocked) stopJoystick()
             movementLocked = !movementLocked
             movementLockButton.text = movementLockLabel()
+            movementLockButton.setBackgroundColor(if (movementLocked) 0xFF176B70.toInt() else 0xFF244254.toInt())
             showStatus(if (movementLocked) "Movimentos vertical e horizontal travados." else "Movimentos liberados.")
         }
         testControls.addView(movementLockButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
