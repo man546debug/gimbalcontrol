@@ -6,9 +6,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.method.LinkMovementMethod
+import android.text.util.Linkify
 import android.view.Gravity
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -25,7 +28,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private lateinit var statusView: TextView
     private lateinit var sensitivityValue: TextView
     private lateinit var panDirectionButton: Button
-    private lateinit var movementLockButton: Button
+    private lateinit var xLockButton: Button
+    private lateinit var yLockButton: Button
     private lateinit var deviceAdapter: ArrayAdapter<String>
     private val devices = mutableListOf<android.bluetooth.BluetoothDevice>()
     private val deviceLabels = mutableListOf<String>()
@@ -34,19 +38,20 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private var joyY = 0f
     private var sensitivity = DEFAULT_SENSITIVITY
     private var panInverted = false
-    private var movementLocked = false
+    private var xAxisLocked = false
+    private var yAxisLocked = false
     private var motionLoopActive = false
     private val handler = Handler(Looper.getMainLooper())
     private val motionRunnable = object : Runnable {
         override fun run() {
             if (!motionLoopActive) return
             if (ble.isReady()) {
-                val panValue = axisInput(joyX)
+                val panValue = axisInput(if (xAxisLocked) 0f else joyX)
                 val pan = if (panInverted) -panValue else panValue
                 // JoystickView reports screen coordinates: positive Y is downward.
-                val tilt = axisInput(joyY)
+                val tilt = axisInput(if (yAxisLocked) 0f else joyY)
                 // Zhiyun joystick frames carry both axes; keep the inactive axis centered.
-                ble.sendAxes(if (movementLocked) 0f else pan, if (movementLocked) 0f else tilt)
+                ble.sendAxes(pan, tilt)
             }
             handler.postDelayed(this, JOYSTICK_PERIOD_MS)
         }
@@ -101,7 +106,22 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(2), dp(2), dp(2), dp(2))
         }
-        root.addView(statusView, LinearLayout.LayoutParams(-1, dp(38)))
+        val statusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        statusRow.addView(statusView, LinearLayout.LayoutParams(0, dp(44), 1f))
+        val infoButton = ImageButton(this).apply {
+            setImageResource(R.drawable.ic_info)
+            setBackgroundColor(0xFF244254.toInt())
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            contentDescription = "Informações do aplicativo"
+            setOnClickListener { showAboutDialog() }
+        }
+        statusRow.addView(infoButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+            leftMargin = dp(8)
+        })
+        root.addView(statusRow, LinearLayout.LayoutParams(-1, dp(46)))
 
         root.addView(label("Arraste o controle para mover pan (esquerda/direita) e tilt (cima/baixo). Solte para parar.").apply {
             gravity = Gravity.CENTER
@@ -149,15 +169,28 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         testControls.addView(panDirectionButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
             rightMargin = dp(4)
         })
-        movementLockButton = button(movementLockLabel())
-        movementLockButton.setOnClickListener {
-            if (!movementLocked) stopJoystick()
-            movementLocked = !movementLocked
-            movementLockButton.text = movementLockLabel()
-            movementLockButton.setBackgroundColor(if (movementLocked) 0xFF176B70.toInt() else 0xFF244254.toInt())
-            showStatus(if (movementLocked) "Movimentos vertical e horizontal travados." else "Movimentos liberados.")
+        xLockButton = button(xAxisLockLabel())
+        xLockButton.contentDescription = "Travar ou destravar o eixo X, pan horizontal"
+        xLockButton.setOnClickListener {
+            xAxisLocked = !xAxisLocked
+            if (xAxisLocked) joyX = 0f
+            refreshAxisLockButtons()
+            stopIfAllMovingAxesAreLockedOrCentered()
+            showStatus(if (xAxisLocked) "Eixo X travado; Y continua livre." else "Eixo X liberado.")
         }
-        testControls.addView(movementLockButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+        testControls.addView(xLockButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            leftMargin = dp(4)
+        })
+        yLockButton = button(yAxisLockLabel())
+        yLockButton.contentDescription = "Travar ou destravar o eixo Y, tilt vertical"
+        yLockButton.setOnClickListener {
+            yAxisLocked = !yAxisLocked
+            if (yAxisLocked) joyY = 0f
+            refreshAxisLockButtons()
+            stopIfAllMovingAxesAreLockedOrCentered()
+            showStatus(if (yAxisLocked) "Eixo Y travado; X continua livre." else "Eixo Y liberado.")
+        }
+        testControls.addView(yLockButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
             leftMargin = dp(4)
         })
         root.addView(testControls, LinearLayout.LayoutParams(-1, dp(50)).apply {
@@ -166,18 +199,13 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
 
         val joystick = JoystickView(this).apply {
             listener = JoystickView.Listener { x, y, released ->
-                if (movementLocked) {
-                    joyX = 0f
-                    joyY = 0f
-                } else {
-                    joyX = x
-                    joyY = y
-                    if (released || (abs(x) < DEAD_ZONE && abs(y) < DEAD_ZONE)) {
-                        stopJoystick()
-                    } else if (!motionLoopActive) {
-                        motionLoopActive = true
-                        handler.post(motionRunnable)
-                    }
+                joyX = if (xAxisLocked) 0f else x
+                joyY = if (yAxisLocked) 0f else y
+                if (released || (abs(joyX) < DEAD_ZONE && abs(joyY) < DEAD_ZONE)) {
+                    stopJoystick()
+                } else if (!motionLoopActive) {
+                    motionLoopActive = true
+                    handler.post(motionRunnable)
                 }
             }
         }
@@ -282,9 +310,40 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         if (::statusView.isInitialized) statusView.text = message
     }
 
+    private fun showAboutDialog() {
+        val aboutText = TextView(this).apply {
+            text = "Smooth 4 Remote\n\nDesenvolvido por Anderson Manfredini\nTelefone: 12 98801-5750"
+            textSize = 16f
+            setTextColor(0xFFB8C7D1.toInt())
+            autoLinkMask = Linkify.PHONE_NUMBERS
+            movementMethod = LinkMovementMethod.getInstance()
+            setPadding(dp(24), dp(8), dp(24), dp(8))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Informações")
+            .setView(aboutText)
+            .setPositiveButton("Fechar", null)
+            .show()
+    }
+
+    private fun refreshAxisLockButtons() {
+        xLockButton.text = xAxisLockLabel()
+        xLockButton.setBackgroundColor(if (xAxisLocked) 0xFF176B70.toInt() else 0xFF244254.toInt())
+        yLockButton.text = yAxisLockLabel()
+        yLockButton.setBackgroundColor(if (yAxisLocked) 0xFF176B70.toInt() else 0xFF244254.toInt())
+    }
+
+    private fun stopIfAllMovingAxesAreLockedOrCentered() {
+        if ((xAxisLocked || abs(joyX) < DEAD_ZONE) && (yAxisLocked || abs(joyY) < DEAD_ZONE)) {
+            stopJoystick()
+        }
+    }
+
     private fun panDirectionLabel() = if (panInverted) "Pan invertido" else "Pan normal"
 
-    private fun movementLockLabel() = if (movementLocked) "Destravar movimento" else "Travar movimento"
+    private fun xAxisLockLabel() = if (xAxisLocked) "X travado" else "Travar X"
+
+    private fun yAxisLockLabel() = if (yAxisLocked) "Y travado" else "Travar Y"
 
     private fun button(text: String) = Button(this).apply {
         this.text = text
