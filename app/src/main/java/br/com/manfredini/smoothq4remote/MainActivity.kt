@@ -15,6 +15,9 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
@@ -22,6 +25,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private lateinit var statusView: TextView
     private lateinit var sensitivityValue: TextView
     private lateinit var panDirectionButton: Button
+    private lateinit var movementLockButton: Button
     private lateinit var deviceAdapter: ArrayAdapter<String>
     private val devices = mutableListOf<android.bluetooth.BluetoothDevice>()
     private val deviceLabels = mutableListOf<String>()
@@ -30,6 +34,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private var joyY = 0f
     private var sensitivity = DEFAULT_SENSITIVITY
     private var panInverted = false
+    private var movementLocked = false
     private var motionLoopActive = false
     private val handler = Handler(Looper.getMainLooper())
     private val motionRunnable = object : Runnable {
@@ -41,7 +46,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 // JoystickView reports screen coordinates: positive Y is downward.
                 val tilt = axisInput(joyY)
                 // Zhiyun joystick frames carry both axes; keep the inactive axis centered.
-                ble.sendAxes(pan, tilt)
+                ble.sendAxes(if (movementLocked) 0f else pan, if (movementLocked) 0f else tilt)
             }
             handler.postDelayed(this, JOYSTICK_PERIOD_MS)
         }
@@ -51,6 +56,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         super.onCreate(savedInstanceState)
         window.statusBarColor = 0xFF101820.toInt()
         window.navigationBarColor = 0xFF101820.toInt()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         ble = SmoothQ4BleClient(this, this)
         buildInterface()
         requestBlePermissions()
@@ -102,44 +108,6 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             textAlignment = TextView.TEXT_ALIGNMENT_CENTER
         }, LinearLayout.LayoutParams(-1, dp(48)))
 
-        val testControls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val panProtocolLabel = label("Pan: YAW 0x03").apply {
-            gravity = Gravity.CENTER
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        }
-        testControls.addView(panProtocolLabel, LinearLayout.LayoutParams(0, dp(44), 1f))
-        panDirectionButton = button(panDirectionLabel())
-        panDirectionButton.setOnClickListener {
-            panInverted = !panInverted
-            panDirectionButton.text = panDirectionLabel()
-        }
-        testControls.addView(panDirectionButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-            leftMargin = dp(8)
-        })
-        root.addView(testControls, LinearLayout.LayoutParams(-1, dp(48)).apply {
-            bottomMargin = dp(4)
-        })
-
-        val joystick = JoystickView(this).apply {
-            listener = JoystickView.Listener { x, y, released ->
-                joyX = x
-                joyY = y
-                if (released || (abs(x) < DEAD_ZONE && abs(y) < DEAD_ZONE)) {
-                    stopJoystick()
-                } else if (!motionLoopActive) {
-                    motionLoopActive = true
-                    handler.post(motionRunnable)
-                }
-            }
-        }
-        root.addView(joystick, LinearLayout.LayoutParams(-1, 0, 1f).apply {
-            topMargin = dp(4)
-            bottomMargin = dp(8)
-        })
-
         val sensitivityHeader = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -165,9 +133,63 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             })
         }
-        root.addView(sensitivityBar, LinearLayout.LayoutParams(-1, dp(54)))
+        root.addView(sensitivityBar, LinearLayout.LayoutParams(-1, dp(52)))
+
+        val testControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        panDirectionButton = button(panDirectionLabel())
+        panDirectionButton.setOnClickListener {
+            panInverted = !panInverted
+            panDirectionButton.text = panDirectionLabel()
+        }
+        testControls.addView(panDirectionButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            rightMargin = dp(4)
+        })
+        movementLockButton = button(movementLockLabel())
+        movementLockButton.setOnClickListener {
+            if (!movementLocked) stopJoystick()
+            movementLocked = !movementLocked
+            movementLockButton.text = movementLockLabel()
+            showStatus(if (movementLocked) "Movimentos vertical e horizontal travados." else "Movimentos liberados.")
+        }
+        testControls.addView(movementLockButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            leftMargin = dp(4)
+        })
+        root.addView(testControls, LinearLayout.LayoutParams(-1, dp(50)).apply {
+            bottomMargin = dp(2)
+        })
+
+        val joystick = JoystickView(this).apply {
+            listener = JoystickView.Listener { x, y, released ->
+                if (movementLocked) {
+                    joyX = 0f
+                    joyY = 0f
+                } else {
+                    joyX = x
+                    joyY = y
+                    if (released || (abs(x) < DEAD_ZONE && abs(y) < DEAD_ZONE)) {
+                        stopJoystick()
+                    } else if (!motionLoopActive) {
+                        motionLoopActive = true
+                        handler.post(motionRunnable)
+                    }
+                }
+            }
+        }
+        root.addView(joystick, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+            topMargin = dp(4)
+            bottomMargin = dp(8)
+        })
 
         setContentView(root)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(dp(16), dp(10) + bars.top, dp(16), dp(12) + bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
     }
 
     private fun openDevicePicker() {
@@ -257,7 +279,9 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         if (::statusView.isInitialized) statusView.text = message
     }
 
-    private fun panDirectionLabel() = if (panInverted) "Inverter pan: ligado" else "Inverter pan: desligado"
+    private fun panDirectionLabel() = if (panInverted) "Pan invertido" else "Pan normal"
+
+    private fun movementLockLabel() = if (movementLocked) "Destravar movimento" else "Travar movimento"
 
     private fun button(text: String) = Button(this).apply {
         this.text = text
