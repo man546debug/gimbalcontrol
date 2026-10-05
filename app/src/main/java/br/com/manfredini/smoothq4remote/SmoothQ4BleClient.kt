@@ -109,7 +109,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     fun sendAxes(pan: Float, tilt: Float, panCommand: Int = SmoothQ4Protocol.PAN) {
         if (writeCharacteristic == null || gatt == null) return
         activePanCommand = panCommand
-        val packets = SmoothQ4Protocol.encodeAxes(pan, tilt, sequence.getAndAdd(2), panCommand)
+        val packets = SmoothQ4Protocol.encodeAxes(pan, tilt, sequence.getAndAdd(3), panCommand)
         synchronized(writeQueue) {
             packets.forEach { writeQueue.addLast(PendingWrite(it)) }
         }
