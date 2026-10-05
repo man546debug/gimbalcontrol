@@ -13,7 +13,7 @@ Aplicativo Android em Kotlin dedicado ao controle manual de pan/tilt do Zhiyun S
 
 ## Compatibilidade do controle
 
-Este é um protótipo de diagnóstico. O formato dos quadros segue capturas públicas de comandos do Smooth 4: cada quadro contém o eixo, o modo `0x10`, o valor de 16 bits centrado em 2048 e o CRC-XMODEM. O app envia primeiro `0x01` (tilt) e depois o comando horizontal selecionado. O `0x01` foi confirmado pelo teste no gimbal como inclinação; o pan é selecionável entre `0x02` e `0x03`, pois o APK oficial distingue os controles PITCH e YAW e o comando horizontal ainda precisa ser validado neste aparelho. O botão de inversão só altera o sinal do pan.
+Este é um protótipo de diagnóstico. O formato dos quadros segue capturas públicas de comandos do Smooth 4: cada quadro contém o eixo, o modo `0x10`, o valor de 16 bits centrado em 2048 e o CRC-XMODEM. A cada atualização o app envia os três comandos de eixo em ordem (`0x01`, `0x02`, `0x03`), mantendo no centro o eixo horizontal que não está selecionado. O `0x01` foi confirmado no gimbal como inclinação; o pan é testado em `0x02` ou `0x03`, pois o SDK do APK oficial trata PITCH, ROLL e YAW separadamente. O botão de inversão só altera o sinal do pan.
 
 Para comparar: conecte o Smooth 4, teste o joystick somente para a esquerda/direita com `Pan: 0x02`; solte o joystick; toque no botão para selecionar `Pan: 0x03`; repita o mesmo movimento. Se o eixo se mover no sentido oposto, use o botão de inversão. Anote qual comando e sentido funcionaram. O teste final precisa ser feito no próprio gimbal.
 
