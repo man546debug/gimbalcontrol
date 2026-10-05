@@ -6,16 +6,14 @@ Aplicativo Android em Kotlin dedicado ao controle manual de pan/tilt do Zhiyun S
 
 - Busca e conexão BLE com dispositivos próximos.
 - Joystick virtual com sensibilidade ajustável; ao soltar, envia comandos neutros.
-- Botão de teste do comando horizontal alterna entre `0x02` (atual) e `0x03` (candidato para YAW).
+- Controle horizontal confirmado no comando YAW `0x03`; tilt em `0x01` e roll centralizado em `0x02`.
 - Botão para inverter o sentido horizontal sem recompilar.
 - Tela dedicada ao joystick, com o controle de sensibilidade sempre visível.
 - GitHub Actions para compilar e disponibilizar o APK de depuração como artefato.
 
 ## Compatibilidade do controle
 
-Este é um protótipo de diagnóstico. O formato dos quadros segue capturas públicas de comandos do Smooth 4: cada quadro contém o eixo, o modo `0x10`, o valor de 16 bits centrado em 2048 e o CRC-XMODEM. A cada atualização o app envia os três comandos de eixo em ordem (`0x01`, `0x02`, `0x03`), mantendo no centro o eixo horizontal que não está selecionado. O `0x01` foi confirmado no gimbal como inclinação; o pan é testado em `0x02` ou `0x03`, pois o SDK do APK oficial trata PITCH, ROLL e YAW separadamente. O botão de inversão só altera o sinal do pan.
-
-Para comparar: conecte o Smooth 4, teste o joystick somente para a esquerda/direita com `Pan: 0x02`; solte o joystick; toque no botão para selecionar `Pan: 0x03`; repita o mesmo movimento. Se o eixo se mover no sentido oposto, use o botão de inversão. Anote qual comando e sentido funcionaram. O teste final precisa ser feito no próprio gimbal.
+O protocolo de movimento foi confirmado no Smooth 4: o app envia três quadros em ordem (`0x01` pitch/tilt, `0x02` roll no centro, `0x03` yaw/pan). Cada quadro contém o modo `0x10`, valor de 16 bits centrado em 2048 e CRC-XMODEM. O botão de inversão altera o sentido horizontal sem recompilar. A confirmação prática do comando YAW `0x03` foi feita no gimbal com o bloqueio do eixo de giro desativado.
 
 Os testes verificam o quadro contra uma captura publicada do Smooth 4 e conferem que os valores dos dois sentidos ficam em lados opostos do centro. A validação final desta troca depende do novo teste no Smooth 4. Teste com espaço livre ao redor do gimbal e com o telefone firmemente preso. Feche o ZY Play antes de conectar este aplicativo.
 
