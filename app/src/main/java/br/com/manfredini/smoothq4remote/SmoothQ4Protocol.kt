@@ -14,9 +14,9 @@ object SmoothQ4Protocol {
     val writeCharacteristic = java.util.UUID.fromString("d44bc439-abfd-45a2-b575-925416129600")
     val notifyCharacteristic = java.util.UUID.fromString("d44bc439-abfd-45a2-b575-925416129601")
 
-    // On the tested Smooth 4, command 0x01 moves tilt and 0x02 moves pan.
-    const val PAN = 0x02
-    const val PAN_YAW_CANDIDATE = 0x03
+    // Confirmed by the user's Smooth 4 test: pitch=0x01, roll=0x02, yaw/pan=0x03.
+    const val PAN = 0x03
+    const val ROLL = 0x02
     const val TILT = 0x01
     const val CENTER = 2048
     private const val AXIS_RANGE = 1748
@@ -30,21 +30,18 @@ object SmoothQ4Protocol {
     }
 
     /**
-     * Send all three axis frames in command order. The official ZY Play SDK
-     * drives pitch, roll, and yaw independently. Keep the unused axis centered
-     * while testing which command byte the Smooth 4 accepts for horizontal pan.
+     * Send all three axis frames in command order: pitch, roll, yaw.
+     * The tested Smooth 4 uses yaw (0x03) for horizontal pan.
      */
     fun encodeAxes(
         pan: Float,
         tilt: Float,
-        firstSequence: Int,
-        panCommand: Int = PAN
+        firstSequence: Int
     ): List<ByteArray> {
-        require(panCommand == PAN || panCommand == PAN_YAW_CANDIDATE)
         return listOf(
             encodeMove(TILT, tilt, firstSequence),
-            encodeMove(PAN, if (panCommand == PAN) pan else 0f, firstSequence + 1),
-            encodeMove(PAN_YAW_CANDIDATE, if (panCommand == PAN_YAW_CANDIDATE) pan else 0f, firstSequence + 2)
+            encodeMove(ROLL, 0f, firstSequence + 1),
+            encodeMove(PAN, pan, firstSequence + 2)
         )
     }
 
