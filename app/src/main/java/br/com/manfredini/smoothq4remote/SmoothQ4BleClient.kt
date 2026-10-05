@@ -38,7 +38,6 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
     private var notifyCharacteristic: BluetoothGattCharacteristic? = null
     private val sequence = AtomicInteger(0)
-    private var activePanCommand = SmoothQ4Protocol.PAN
     private val found = LinkedHashMap<String, BluetoothDevice>()
     private val writeQueue = java.util.ArrayDeque<PendingWrite>()
     private var writeDrainScheduled = false
@@ -106,10 +105,9 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     }
 
     @SuppressLint("MissingPermission")
-    fun sendAxes(pan: Float, tilt: Float, panCommand: Int = SmoothQ4Protocol.PAN) {
+    fun sendAxes(pan: Float, tilt: Float) {
         if (writeCharacteristic == null || gatt == null) return
-        activePanCommand = panCommand
-        val packets = SmoothQ4Protocol.encodeAxes(pan, tilt, sequence.getAndAdd(3), panCommand)
+        val packets = SmoothQ4Protocol.encodeAxes(pan, tilt, sequence.getAndAdd(3))
         synchronized(writeQueue) {
             packets.forEach { writeQueue.addLast(PendingWrite(it)) }
         }
@@ -118,7 +116,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
 
     fun stopMotion() {
         synchronized(writeQueue) { writeQueue.clear() }
-        sendAxes(0f, 0f, activePanCommand)
+        sendAxes(0f, 0f)
     }
 
     fun isReady(): Boolean = writeCharacteristic != null && gatt != null
