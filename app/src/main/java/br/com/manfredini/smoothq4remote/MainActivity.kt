@@ -275,7 +275,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         deviceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, mutableListOf())
         val searchField = EditText(this).apply {
             hint = "Filtrar por nome ou endereço"
-            singleLine = true
+            maxLines = 1
             setPadding(dp(14), dp(8), dp(14), dp(8))
         }
         val deviceList = ListView(this).apply {
