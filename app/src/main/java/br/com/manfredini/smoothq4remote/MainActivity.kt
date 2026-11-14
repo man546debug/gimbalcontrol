@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.widget.EditText
 import android.text.method.LinkMovementMethod
 import android.text.util.Linkify
 import android.view.Gravity
@@ -37,6 +38,13 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private lateinit var panDirectionButton: Button
     private lateinit var xLockButton: Button
     private lateinit var yLockButton: Button
+    private lateinit var poseTracker: PhonePoseTracker
+    private val presetLabelFields = mutableListOf<EditText>()
+    private val presetGoButtons = mutableListOf<Button>()
+    private var targetPose: PhonePoseTracker.Pose? = null
+    private var activePresetIndex = -1
+    private var presetStartTime = 0L
+    private var settledSamples = 0
     private lateinit var deviceAdapter: ArrayAdapter<String>
     private val devices = mutableListOf<android.bluetooth.BluetoothDevice>()
     private val deviceLabels = mutableListOf<String>()
@@ -50,6 +58,43 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private var motionLoopActive = false
     private var autoConnectAttempted = false
     private val handler = Handler(Looper.getMainLooper())
+    private val presetMotionRunnable = object : Runnable {
+        override fun run() {
+            val target = targetPose ?: return
+            val current = poseTracker.currentPose
+            if (current == null) {
+                cancelPresetMotion("Sensor de orientação sem leitura; movimento interrompido.")
+                return
+            }
+            if (System.currentTimeMillis() - presetStartTime > MAX_PRESET_DURATION_MS) {
+                cancelPresetMotion("Tempo limite do preset; confira o enquadramento.")
+                return
+            }
+            val yawError = shortestAngle(target.yawDegrees - current.yawDegrees)
+            val pitchError = target.pitchDegrees - current.pitchDegrees
+            if (abs(yawError) <= PRESET_TOLERANCE_DEGREES && abs(pitchError) <= PRESET_TOLERANCE_DEGREES) {
+                settledSamples += 1
+                gimbalService?.sendAxes(0f, 0f)
+                if (settledSamples >= PRESET_SETTLED_SAMPLES) {
+                    targetPose = null
+                    activePresetIndex = -1
+                    refreshPresetButtons()
+                    showStatus("Enquadramento do preset alcançado (estimativa do celular).")
+                    return
+                }
+            } else {
+                settledSamples = 0
+                val rawPan = proportionalCommand(yawError, PRESET_PAN_GAIN)
+                val pan = if (panInverted) -rawPan else rawPan
+                // The joystick's positive vertical command points the camera down;
+                // elevation error has the opposite sign.
+                val tilt = if (yAxisLocked) 0f else proportionalCommand(-pitchError, PRESET_TILT_GAIN)
+                val allowedPan = if (xAxisLocked) 0f else pan
+                gimbalService?.sendAxes(allowedPan, tilt)
+            }
+            handler.postDelayed(this, PRESET_CONTROL_PERIOD_MS)
+        }
+    }
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as? GimbalConnectionService.LocalBinder ?: return
@@ -82,6 +127,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         window.statusBarColor = 0xFF101820.toInt()
         window.navigationBarColor = 0xFF101820.toInt()
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        poseTracker = PhonePoseTracker(this)
         buildInterface()
         requestBlePermissions()
     }
@@ -117,7 +163,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             gravity = Gravity.CENTER_VERTICAL
         }
         val title = TextView(this).apply {
-            text = "SMOOTH 4"
+            text = "SMOOTH 4 • TESTE"
             textSize = 20f
             setTextColor(0xFFFFFFFF.toInt())
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -235,8 +281,13 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             bottomMargin = dp(2)
         })
 
+        val controlArea = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val joystick = JoystickView(this).apply {
             listener = JoystickView.Listener { x, y, released ->
+                if (targetPose != null) cancelPresetMotion("Preset interrompido pelo joystick.")
                 joyX = if (xAxisLocked) 0f else x
                 joyY = if (yAxisLocked) 0f else y
                 if (released || (abs(joyX) < DEAD_ZONE && abs(joyY) < DEAD_ZONE)) {
@@ -247,10 +298,65 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 }
             }
         }
-        root.addView(joystick, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+        controlArea.addView(joystick, LinearLayout.LayoutParams(0, -1, 1f).apply {
             topMargin = dp(4)
             bottomMargin = dp(8)
+            rightMargin = dp(6)
         })
+        val presetPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(2), dp(4), dp(2), dp(4))
+        }
+        presetPanel.addView(label("POSIÇÕES").apply {
+            textSize = 10f
+            gravity = Gravity.CENTER
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(-1, dp(24)))
+        repeat(PRESET_COUNT) { index ->
+            val savedLabel = getSharedPreferences(PRESET_PREFS, MODE_PRIVATE)
+                .getString(presetLabelKey(index), "Cena ${index + 1}") ?: "Cena ${index + 1}"
+            val nameField = EditText(this).apply {
+                setSingleLine(true)
+                textSize = 10f
+                setTextColor(0xFFFFFFFF.toInt())
+                setHintTextColor(0xFF8FA5B3.toInt())
+                hint = "Nome ${index + 1}"
+                setText(savedLabel)
+                setPadding(dp(4), 0, dp(4), 0)
+                backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF527080.toInt())
+            }
+            presetLabelFields += nameField
+            presetPanel.addView(nameField, LinearLayout.LayoutParams(-1, dp(34)))
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            val saveButton = button("Salvar").apply {
+                textSize = 9f
+                minHeight = dp(34)
+                setPadding(dp(2), 0, dp(2), 0)
+                setOnClickListener { savePreset(index) }
+            }
+            val goButton = button("Ir").apply {
+                textSize = 10f
+                minHeight = dp(34)
+                setPadding(dp(2), 0, dp(2), 0)
+                setOnClickListener { moveToPreset(index) }
+            }
+            presetGoButtons += goButton
+            actions.addView(saveButton, LinearLayout.LayoutParams(0, dp(34), 1f).apply { rightMargin = dp(2) })
+            actions.addView(goButton, LinearLayout.LayoutParams(0, dp(34), 1f).apply { leftMargin = dp(2) })
+            presetPanel.addView(actions, LinearLayout.LayoutParams(-1, dp(38)))
+            if (index < PRESET_COUNT - 1) presetPanel.addView(android.view.View(this).apply {
+                setBackgroundColor(0xFF314653.toInt())
+            }, LinearLayout.LayoutParams(-1, dp(1)).apply {
+                topMargin = dp(5)
+                bottomMargin = dp(5)
+            })
+        }
+        controlArea.addView(presetPanel, LinearLayout.LayoutParams(dp(112), -1))
+        root.addView(controlArea, LinearLayout.LayoutParams(-1, 0, 1f))
 
         setContentView(root)
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
@@ -335,6 +441,87 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         deviceLabels.forEach(deviceAdapter::add)
         deviceAdapter.notifyDataSetChanged()
     }
+
+    private fun savePreset(index: Int) {
+        val pose = poseTracker.currentPose
+        if (!poseTracker.isAvailable || pose == null) {
+            showStatus("Aguardando leitura do sensor de orientação; tente novamente.")
+            return
+        }
+        val name = presetLabelFields[index].text.toString().trim().ifBlank { "Posição ${index + 1}" }
+        getSharedPreferences(PRESET_PREFS, MODE_PRIVATE).edit()
+            .putString(presetLabelKey(index), name)
+            .putFloat(presetYawKey(index), pose.yawDegrees)
+            .putFloat(presetPitchKey(index), pose.pitchDegrees)
+            .putBoolean(presetSavedKey(index), true)
+            .apply()
+        presetLabelFields[index].setText(name)
+        showStatus("Preset '$name' salvo. Ângulos estimados pelo celular.")
+    }
+
+    private fun moveToPreset(index: Int) {
+        if (activePresetIndex == index && targetPose != null) {
+            cancelPresetMotion("Movimento do preset cancelado.")
+            return
+        }
+        if (gimbalService?.isReady() != true) {
+            showStatus("Conecte o Smooth 4 antes de usar os presets.")
+            return
+        }
+        val preferences = getSharedPreferences(PRESET_PREFS, MODE_PRIVATE)
+        if (!preferences.getBoolean(presetSavedKey(index), false)) {
+            showStatus("Salve uma posição nesse botão primeiro.")
+            return
+        }
+        val current = poseTracker.currentPose
+        if (!poseTracker.isAvailable || current == null) {
+            showStatus("Sensor de orientação sem leitura; preset não iniciado.")
+            return
+        }
+        val target = PhonePoseTracker.Pose(
+            preferences.getFloat(presetYawKey(index), current.yawDegrees),
+            preferences.getFloat(presetPitchKey(index), current.pitchDegrees)
+        )
+        handler.removeCallbacks(presetMotionRunnable)
+        targetPose = target
+        activePresetIndex = index
+        presetStartTime = System.currentTimeMillis()
+        settledSamples = 0
+        motionLoopActive = false
+        handler.removeCallbacks(motionRunnable)
+        refreshPresetButtons()
+        showStatus("Indo para '${presetLabelFields[index].text}' (estimativa IMU; toque Parar para cancelar).")
+        handler.post(presetMotionRunnable)
+    }
+
+    private fun cancelPresetMotion(message: String, updateStatus: Boolean = true) {
+        if (targetPose == null) return
+        targetPose = null
+        activePresetIndex = -1
+        handler.removeCallbacks(presetMotionRunnable)
+        gimbalService?.stopMotion()
+        refreshPresetButtons()
+        if (updateStatus) showStatus(message)
+    }
+
+    private fun refreshPresetButtons() {
+        presetGoButtons.forEachIndexed { index, button ->
+            button.text = if (targetPose != null && activePresetIndex == index) "Parar" else "Ir"
+        }
+    }
+
+    private fun shortestAngle(degrees: Float): Float = ((degrees + 540f) % 360f) - 180f
+
+    private fun proportionalCommand(error: Float, gain: Float): Float {
+        if (abs(error) <= PRESET_TOLERANCE_DEGREES) return 0f
+        val magnitude = (abs(error) * gain).coerceIn(PRESET_MIN_SPEED, PRESET_MAX_SPEED)
+        return if (error >= 0f) magnitude else -magnitude
+    }
+
+    private fun presetLabelKey(index: Int) = "preset_${index}_label"
+    private fun presetYawKey(index: Int) = "preset_${index}_yaw"
+    private fun presetPitchKey(index: Int) = "preset_${index}_pitch"
+    private fun presetSavedKey(index: Int) = "preset_${index}_saved"
 
     private fun requestBlePermissions() {
         val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -488,8 +675,15 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
+    override fun onResume() {
+        super.onResume()
+        poseTracker.start()
+    }
+
     override fun onPause() {
+        cancelPresetMotion("Preset interrompido ao sair da tela.", updateStatus = false)
         stopJoystick()
+        poseTracker.stop()
         super.onPause()
     }
 
@@ -504,6 +698,16 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         private const val DEFAULT_SENSITIVITY = 0.65f
         private const val JOYSTICK_PERIOD_MS = 100L
         private const val BLE_PERMISSION_REQUEST = 2401
+        private const val PRESET_PREFS = "smooth4_position_presets_test"
+        private const val PRESET_COUNT = 3
+        private const val PRESET_CONTROL_PERIOD_MS = 100L
+        private const val MAX_PRESET_DURATION_MS = 12_000L
+        private const val PRESET_SETTLED_SAMPLES = 3
+        private const val PRESET_TOLERANCE_DEGREES = 3f
+        private const val PRESET_PAN_GAIN = 0.012f
+        private const val PRESET_TILT_GAIN = 0.012f
+        private const val PRESET_MIN_SPEED = 0.07f
+        private const val PRESET_MAX_SPEED = 0.30f
     }
 }
 
