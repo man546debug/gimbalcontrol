@@ -10,14 +10,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.text.Editable
 import android.text.method.LinkMovementMethod
-import android.text.TextWatcher
 import android.text.util.Linkify
 import android.view.Gravity
 import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -41,7 +38,6 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private lateinit var xLockButton: Button
     private lateinit var yLockButton: Button
     private lateinit var deviceAdapter: ArrayAdapter<String>
-    private var deviceFilter = ""
     private val devices = mutableListOf<android.bluetooth.BluetoothDevice>()
     private val deviceLabels = mutableListOf<String>()
     private var deviceDialog: AlertDialog? = null
@@ -52,12 +48,13 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private var xAxisLocked = false
     private var yAxisLocked = false
     private var motionLoopActive = false
+    private var autoConnectAttempted = false
     private val handler = Handler(Looper.getMainLooper())
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as? GimbalConnectionService.LocalBinder ?: return
             gimbalService = binder.getService().also { it.setObserver(this@MainActivity) }
-            if (scanWhenServiceReady) beginBluetoothScan()
+            if (scanWhenServiceReady) beginBluetoothScan() else connectToLastGimbal()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -264,6 +261,16 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         ViewCompat.requestApplyInsets(root)
     }
 
+    private fun connectToLastGimbal() {
+        if (autoConnectAttempted || !hasBlePermissions()) return
+        val address = getSharedPreferences(GimbalConnectionService.PREFS_FILE, MODE_PRIVATE)
+            .getString(GimbalConnectionService.PREF_KEY_LAST_GIMBAL_ADDRESS, null)
+            ?.takeIf { it.isNotBlank() } ?: return
+        autoConnectAttempted = true
+        showStatus("Conectando ao último Smooth 4 salvo…")
+        startGimbalService(GimbalConnectionService.ACTION_CONNECT, address)
+    }
+
     private fun openDevicePicker() {
         if (!hasBlePermissions()) {
             requestBlePermissions()
@@ -271,13 +278,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         }
         devices.clear()
         deviceLabels.clear()
-        deviceFilter = ""
         deviceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, mutableListOf())
-        val searchField = EditText(this).apply {
-            hint = "Filtrar por nome ou endereço"
-            maxLines = 1
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-        }
         val deviceList = ListView(this).apply {
             adapter = deviceAdapter
             setOnItemClickListener { _, _, which, _ ->
@@ -294,18 +295,9 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 }
             }
         }
-        searchField.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                deviceFilter = s?.toString().orEmpty()
-                refreshDeviceAdapter()
-            }
-            override fun afterTextChanged(s: Editable?) = Unit
-        })
         val dialogContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(searchField, LinearLayout.LayoutParams(-1, dp(52)))
-            addView(deviceList, LinearLayout.LayoutParams(-1, dp(360)))
+            addView(deviceList, LinearLayout.LayoutParams(-1, dp(412)))
         }
         deviceDialog = AlertDialog.Builder(this)
             .setTitle("Selecione o Smooth 4")
@@ -339,10 +331,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
 
     private fun refreshDeviceAdapter() {
         if (!::deviceAdapter.isInitialized) return
-        val query = deviceFilter.trim()
         deviceAdapter.clear()
-        deviceLabels.filter { query.isEmpty() || it.contains(query, ignoreCase = true) }
-            .forEach(deviceAdapter::add)
+        deviceLabels.forEach(deviceAdapter::add)
         deviceAdapter.notifyDataSetChanged()
     }
 
@@ -362,7 +352,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != BLE_PERMISSION_REQUEST) return
         if (hasBlePermissions()) {
-            showStatus("Permissão pronta. Toque em Conectar.")
+            showStatus("Permissão pronta.")
+            connectToLastGimbal()
         } else {
             showStatus("Permita o Bluetooth para localizar o Smooth 4.")
         }
