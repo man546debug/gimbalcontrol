@@ -109,6 +109,11 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
         if (writeCharacteristic == null || gatt == null) return
         val packets = SmoothQ4Protocol.encodeAxes(pan, tilt, sequence.getAndAdd(3))
         synchronized(writeQueue) {
+            // Joystick updates can arrive faster than some Android BLE stacks can
+            // transmit all three axis frames. Drop stale unsent positions and keep
+            // only the newest position, so a temporary radio stall cannot create
+            // an ever-growing queue that overloads the app.
+            if (writeQueue.size >= AXIS_PACKET_COUNT) writeQueue.clear()
             packets.forEach { writeQueue.addLast(PendingWrite(it)) }
         }
         scheduleWriteDrain()
@@ -290,6 +295,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
         private const val WRITE_INTERVAL_MS = 30L
         private const val WRITE_RETRY_INTERVAL_MS = 60L
         private const val MAX_WRITE_RETRIES = 4
+        private const val AXIS_PACKET_COUNT = 3
         private val CLIENT_CONFIGURATION = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }
