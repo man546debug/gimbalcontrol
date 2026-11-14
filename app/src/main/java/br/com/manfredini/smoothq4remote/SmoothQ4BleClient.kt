@@ -33,7 +33,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val adapter: BluetoothAdapter? =
         (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-    private var scanner: BluetoothLeScanner? = null
+    @Volatile private var scanner: BluetoothLeScanner? = null
     private var gatt: BluetoothGatt? = null
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
     private var notifyCharacteristic: BluetoothGattCharacteristic? = null
@@ -41,8 +41,11 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     private val found = LinkedHashMap<String, BluetoothDevice>()
     private var devicesUpdateScheduled = false
     private val devicesUpdateRunnable = Runnable {
-        devicesUpdateScheduled = false
-        listener.onDevicesFound(found.values.toList())
+        val snapshot = synchronized(found) {
+            devicesUpdateScheduled = false
+            found.values.toList()
+        }
+        if (scanner != null) listener.onDevicesFound(snapshot)
     }
     private val writeQueue = java.util.ArrayDeque<PendingWrite>()
     private var writeDrainScheduled = false
@@ -55,9 +58,9 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val key = device.address ?: return
-            mainHandler.post {
-                if (scanner == null) return@post
-                if (!found.containsKey(key) && found.size >= MAX_SCAN_RESULTS) return@post
+            synchronized(found) {
+                if (scanner == null) return
+                if (!found.containsKey(key) && found.size >= MAX_SCAN_RESULTS) return
                 found[key] = device
                 if (!devicesUpdateScheduled) {
                     devicesUpdateScheduled = true
@@ -81,9 +84,11 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
             return
         }
         stopScan()
-        found.clear()
+        synchronized(found) {
+            found.clear()
+            devicesUpdateScheduled = false
+        }
         mainHandler.removeCallbacks(devicesUpdateRunnable)
-        devicesUpdateScheduled = false
         scanner = bluetoothAdapter.bluetoothLeScanner
         if (scanner == null) {
             status("O celular não disponibilizou o scanner BLE.")
@@ -98,7 +103,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     fun stopScan() {
         mainHandler.removeCallbacks(stopScanRunnable)
         mainHandler.removeCallbacks(devicesUpdateRunnable)
-        devicesUpdateScheduled = false
+        synchronized(found) { devicesUpdateScheduled = false }
         try {
             scanner?.stopScan(scanCallback)
         } catch (_: SecurityException) {
