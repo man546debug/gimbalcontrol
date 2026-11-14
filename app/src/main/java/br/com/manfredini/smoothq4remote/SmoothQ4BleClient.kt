@@ -99,7 +99,7 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
         mainHandler.removeCallbacks(stopScanRunnable)
         mainHandler.removeCallbacks(devicesUpdateRunnable)
         devicesUpdateScheduled = false
-        try
+        try {
             scanner?.stopScan(scanCallback)
         } catch (_: SecurityException) {
             // Permission can be revoked while the screen is open.
