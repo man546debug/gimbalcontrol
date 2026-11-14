@@ -1,18 +1,26 @@
 package br.com.manfredini.smoothq4remote
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
+import android.text.Editable
 import android.text.method.LinkMovementMethod
+import android.text.TextWatcher
 import android.text.util.Linkify
 import android.view.Gravity
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
@@ -24,13 +32,16 @@ import androidx.core.view.WindowInsetsCompat
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
-    private lateinit var ble: SmoothQ4BleClient
+    private var gimbalService: GimbalConnectionService? = null
+    private var serviceBound = false
+    private var scanWhenServiceReady = false
     private lateinit var statusView: TextView
     private lateinit var sensitivityValue: TextView
     private lateinit var panDirectionButton: Button
     private lateinit var xLockButton: Button
     private lateinit var yLockButton: Button
     private lateinit var deviceAdapter: ArrayAdapter<String>
+    private var deviceFilter = ""
     private val devices = mutableListOf<android.bluetooth.BluetoothDevice>()
     private val deviceLabels = mutableListOf<String>()
     private var deviceDialog: AlertDialog? = null
@@ -42,16 +53,28 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private var yAxisLocked = false
     private var motionLoopActive = false
     private val handler = Handler(Looper.getMainLooper())
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as? GimbalConnectionService.LocalBinder ?: return
+            gimbalService = binder.getService().also { it.setObserver(this@MainActivity) }
+            if (scanWhenServiceReady) beginBluetoothScan()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            gimbalService?.setObserver(null)
+            gimbalService = null
+        }
+    }
     private val motionRunnable = object : Runnable {
         override fun run() {
             if (!motionLoopActive) return
-            if (ble.isReady()) {
+            if (gimbalService?.isReady() == true) {
                 val panValue = axisInput(if (xAxisLocked) 0f else joyX)
                 val pan = if (panInverted) -panValue else panValue
                 // JoystickView reports screen coordinates: positive Y is downward.
                 val tilt = axisInput(if (yAxisLocked) 0f else joyY)
                 // Zhiyun joystick frames carry both axes; keep the inactive axis centered.
-                ble.sendAxes(pan, tilt)
+                gimbalService?.sendAxes(pan, tilt)
             }
             handler.postDelayed(this, JOYSTICK_PERIOD_MS)
         }
@@ -62,9 +85,27 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         window.statusBarColor = 0xFF101820.toInt()
         window.navigationBarColor = 0xFF101820.toInt()
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        ble = SmoothQ4BleClient(this, this)
         buildInterface()
         requestBlePermissions()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        serviceBound = bindService(
+            Intent(this, GimbalConnectionService::class.java),
+            serviceConnection,
+            BIND_AUTO_CREATE
+        )
+    }
+
+    override fun onStop() {
+        gimbalService?.setObserver(null)
+        if (serviceBound) {
+            unbindService(serviceConnection)
+            serviceBound = false
+        }
+        gimbalService = null
+        super.onStop()
     }
 
     private fun buildInterface() {
@@ -91,8 +132,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         val disconnectButton = button("Desconectar")
         disconnectButton.setOnClickListener {
             stopJoystick()
-            ble.disconnect(sendStop = true)
-            showStatus("Desconectado.")
+            startGimbalService(GimbalConnectionService.ACTION_DISCONNECT)
+            showStatus("Desconectando do gimbal…")
         }
         header.addView(disconnectButton, LinearLayout.LayoutParams(dp(122), dp(46)).apply {
             leftMargin = dp(8)
@@ -230,16 +271,79 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         }
         devices.clear()
         deviceLabels.clear()
-        deviceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, deviceLabels)
-        deviceDialog = AlertDialog.Builder(this)
-            .setTitle("Dispositivos Bluetooth próximos")
-            .setAdapter(deviceAdapter) { _, which ->
-                if (which in devices.indices) ble.connect(devices[which])
+        deviceFilter = ""
+        deviceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, mutableListOf())
+        val searchField = EditText(this).apply {
+            hint = "Filtrar por nome ou endereço"
+            singleLine = true
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+        }
+        val deviceList = ListView(this).apply {
+            adapter = deviceAdapter
+            setOnItemClickListener { _, _, which, _ ->
+                val selectedLabel = deviceAdapter.getItem(which) ?: return@setOnItemClickListener
+                val deviceIndex = deviceLabels.indexOf(selectedLabel)
+                if (deviceIndex in devices.indices) {
+                    val device = devices[deviceIndex]
+                    getSharedPreferences(GimbalConnectionService.PREFS_FILE, MODE_PRIVATE)
+                        .edit()
+                        .putString(GimbalConnectionService.PREF_KEY_LAST_GIMBAL_ADDRESS, device.address)
+                        .apply()
+                    deviceDialog?.dismiss()
+                    startGimbalService(GimbalConnectionService.ACTION_CONNECT, device.address)
+                }
             }
-            .setNegativeButton("Fechar") { dialog, _ -> dialog.dismiss(); ble.stopScan() }
+        }
+        searchField.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                deviceFilter = s?.toString().orEmpty()
+                refreshDeviceAdapter()
+            }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        val dialogContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(searchField, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(deviceList, LinearLayout.LayoutParams(-1, dp(360)))
+        }
+        deviceDialog = AlertDialog.Builder(this)
+            .setTitle("Selecione o Smooth 4")
+            .setView(dialogContent)
+            .setNegativeButton("Fechar") { dialog, _ ->
+                dialog.dismiss()
+                gimbalService?.stopScan()
+            }
             .create()
         deviceDialog?.show()
-        ble.startScan()
+        scanWhenServiceReady = gimbalService == null
+        if (gimbalService != null) beginBluetoothScan()
+    }
+
+    private fun beginBluetoothScan() {
+        scanWhenServiceReady = false
+        startGimbalService(GimbalConnectionService.ACTION_SCAN)
+    }
+
+    private fun startGimbalService(action: String, deviceAddress: String? = null) {
+        val intent = Intent(this, GimbalConnectionService::class.java).setAction(action)
+        if (deviceAddress != null) {
+            intent.putExtra(GimbalConnectionService.EXTRA_DEVICE_ADDRESS, deviceAddress)
+        }
+        if (action == GimbalConnectionService.ACTION_DISCONNECT) {
+            startService(intent)
+        } else {
+            ContextCompat.startForegroundService(this, intent)
+        }
+    }
+
+    private fun refreshDeviceAdapter() {
+        if (!::deviceAdapter.isInitialized) return
+        val query = deviceFilter.trim()
+        deviceAdapter.clear()
+        deviceLabels.filter { query.isEmpty() || it.contains(query, ignoreCase = true) }
+            .forEach(deviceAdapter::add)
+        deviceAdapter.notifyDataSetChanged()
     }
 
     private fun requestBlePermissions() {
@@ -280,7 +384,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         if (motionLoopActive) {
             motionLoopActive = false
             handler.removeCallbacks(motionRunnable)
-            if (ble.isReady()) ble.stopMotion()
+            if (gimbalService?.isReady() == true) gimbalService?.stopMotion()
         }
     }
 
@@ -288,13 +392,33 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
 
     override fun onDevicesFound(foundDevices: List<android.bluetooth.BluetoothDevice>) {
         if (!::deviceAdapter.isInitialized) return
-        val currentAddresses = devices.map { it.address }.toSet()
-        foundDevices.filter { it.address !in currentAddresses }.forEach { device ->
-            devices += device
-            val name = try { device.name ?: "Dispositivo BLE" } catch (_: SecurityException) { "Dispositivo BLE" }
-            deviceLabels += "$name  •  ${device.address}"
+        val lastAddress = getSharedPreferences(GimbalConnectionService.PREFS_FILE, MODE_PRIVATE)
+            .getString(GimbalConnectionService.PREF_KEY_LAST_GIMBAL_ADDRESS, null)
+        devices.clear()
+        devices.addAll(
+            foundDevices.distinctBy { it.address }
+                .sortedWith(
+                    compareBy<android.bluetooth.BluetoothDevice> {
+                        when {
+                            it.address.equals(lastAddress, ignoreCase = true) -> 0
+                            isLikelyGimbal(safeDeviceName(it)) -> 1
+                            else -> 2
+                        }
+                    }.thenBy { safeDeviceName(it).lowercase() }
+                )
+        )
+        deviceLabels.clear()
+        devices.forEach { device ->
+            val address = device.address
+            val name = safeDeviceName(device)
+            val prefix = when {
+                address.equals(lastAddress, ignoreCase = true) -> "★ ÚLTIMO GIMBAL"
+                isLikelyGimbal(name) -> "◆ POSSÍVEL SMOOTH 4"
+                else -> ""
+            }
+            deviceLabels += listOf(prefix, name).filter { it.isNotBlank() }.joinToString(" — ") + "  •  $address"
         }
-        deviceAdapter.notifyDataSetChanged()
+        refreshDeviceAdapter()
     }
 
     override fun onReady() {
@@ -304,6 +428,17 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
 
     override fun onPacketReceived(bytes: ByteArray) {
         if (bytes.isNotEmpty()) showStatus("Resposta do gimbal recebida por Bluetooth.")
+    }
+
+    private fun safeDeviceName(device: android.bluetooth.BluetoothDevice): String = try {
+        device.name?.takeIf { it.isNotBlank() } ?: "Dispositivo sem nome"
+    } catch (_: SecurityException) {
+        "Dispositivo Bluetooth"
+    }
+
+    private fun isLikelyGimbal(name: String): Boolean {
+        val normalized = name.lowercase().replace(" ", "")
+        return normalized.contains("smooth") || normalized.contains("zhiyun") || normalized.startsWith("zy")
     }
 
     private fun showStatus(message: String) {
@@ -369,7 +504,6 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
 
     override fun onDestroy() {
         stopJoystick()
-        if (::ble.isInitialized) ble.disconnect(sendStop = true)
         super.onDestroy()
     }
 
@@ -381,3 +515,4 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         private const val BLE_PERMISSION_REQUEST = 2401
     }
 }
+
