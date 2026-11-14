@@ -39,6 +39,11 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     private var notifyCharacteristic: BluetoothGattCharacteristic? = null
     private val sequence = AtomicInteger(0)
     private val found = LinkedHashMap<String, BluetoothDevice>()
+    private var devicesUpdateScheduled = false
+    private val devicesUpdateRunnable = Runnable {
+        devicesUpdateScheduled = false
+        listener.onDevicesFound(found.values.toList())
+    }
     private val writeQueue = java.util.ArrayDeque<PendingWrite>()
     private var writeDrainScheduled = false
     private val writeDrainRunnable = Runnable {
@@ -50,9 +55,15 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val key = device.address ?: return
-            found[key] = device
-            val devices = found.values.toList()
-            mainHandler.post { listener.onDevicesFound(devices) }
+            mainHandler.post {
+                if (scanner == null) return@post
+                if (!found.containsKey(key) && found.size >= MAX_SCAN_RESULTS) return@post
+                found[key] = device
+                if (!devicesUpdateScheduled) {
+                    devicesUpdateScheduled = true
+                    mainHandler.postDelayed(devicesUpdateRunnable, DEVICE_UPDATE_INTERVAL_MS)
+                }
+            }
         }
 
         override fun onScanFailed(errorCode: Int) {
@@ -71,6 +82,8 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
         }
         stopScan()
         found.clear()
+        mainHandler.removeCallbacks(devicesUpdateRunnable)
+        devicesUpdateScheduled = false
         scanner = bluetoothAdapter.bluetoothLeScanner
         if (scanner == null) {
             status("O celular não disponibilizou o scanner BLE.")
@@ -84,7 +97,9 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
     @SuppressLint("MissingPermission")
     fun stopScan() {
         mainHandler.removeCallbacks(stopScanRunnable)
-        try {
+        mainHandler.removeCallbacks(devicesUpdateRunnable)
+        devicesUpdateScheduled = false
+        try
             scanner?.stopScan(scanCallback)
         } catch (_: SecurityException) {
             // Permission can be revoked while the screen is open.
@@ -296,6 +311,8 @@ class SmoothQ4BleClient(context: Context, private val listener: Listener) {
         private const val WRITE_RETRY_INTERVAL_MS = 60L
         private const val MAX_WRITE_RETRIES = 4
         private const val AXIS_PACKET_COUNT = 3
+        private const val MAX_SCAN_RESULTS = 50
+        private const val DEVICE_UPDATE_INTERVAL_MS = 500L
         private val CLIENT_CONFIGURATION = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }
