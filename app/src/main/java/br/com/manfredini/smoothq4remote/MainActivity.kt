@@ -128,6 +128,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         window.navigationBarColor = 0xFF101820.toInt()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         poseTracker = PhonePoseTracker(this)
+        panInverted = getSharedPreferences(PRESET_PREFS, MODE_PRIVATE).getBoolean(PREF_KEY_PAN_INVERTED, false)
         buildInterface()
         requestBlePermissions()
     }
@@ -163,7 +164,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             gravity = Gravity.CENTER_VERTICAL
         }
         val title = TextView(this).apply {
-            text = "SMOOTH 4 • TESTE"
+            text = "SMOOTH 4 TESTE 0.9.1"
             textSize = 20f
             setTextColor(0xFFFFFFFF.toInt())
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -243,11 +244,16 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        panDirectionButton = button(panDirectionLabel())
+        panDirectionButton = button(panDirectionLabel()).apply {
+            setBackgroundColor(if (panInverted) 0xFF176B70.toInt() else 0xFF244254.toInt())
+        }
         panDirectionButton.setOnClickListener {
+            stopJoystick()
             panInverted = !panInverted
             panDirectionButton.text = panDirectionLabel()
             panDirectionButton.setBackgroundColor(if (panInverted) 0xFF176B70.toInt() else 0xFF244254.toInt())
+            getSharedPreferences(PRESET_PREFS, MODE_PRIVATE).edit().putBoolean(PREF_KEY_PAN_INVERTED, panInverted).apply()
+            android.widget.Toast.makeText(this, if (panInverted) "Pan invertido" else "Pan normal", android.widget.Toast.LENGTH_SHORT).show()
             showStatus(if (panInverted) "Pan invertido: esquerda e direita trocadas." else "Pan normal: sentido padrão.")
         }
         testControls.addView(panDirectionButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
@@ -281,6 +287,12 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             bottomMargin = dp(2)
         })
 
+        root.addView(label("POSIÇÕES SALVAS — edite o nome, toque SALVAR e depois IR.").apply {
+            textSize = 12f
+            gravity = Gravity.CENTER
+            textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+            setTextColor(0xFF45D6B5.toInt())
+        }, LinearLayout.LayoutParams(-1, dp(30)))
         val controlArea = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -306,10 +318,11 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         val presetPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(2), dp(4), dp(2), dp(4))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            setBackgroundColor(0xFF172630.toInt())
         }
-        presetPanel.addView(label("POSIÇÕES").apply {
-            textSize = 10f
+        presetPanel.addView(label("PRESETS").apply {
+            textSize = 12f
             gravity = Gravity.CENTER
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }, LinearLayout.LayoutParams(-1, dp(24)))
@@ -318,7 +331,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 .getString(presetLabelKey(index), "Cena ${index + 1}") ?: "Cena ${index + 1}"
             val nameField = EditText(this).apply {
                 setSingleLine(true)
-                textSize = 10f
+                textSize = 11f
                 setTextColor(0xFFFFFFFF.toInt())
                 setHintTextColor(0xFF8FA5B3.toInt())
                 hint = "Nome ${index + 1}"
@@ -327,27 +340,27 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF527080.toInt())
             }
             presetLabelFields += nameField
-            presetPanel.addView(nameField, LinearLayout.LayoutParams(-1, dp(34)))
+            presetPanel.addView(nameField, LinearLayout.LayoutParams(-1, dp(36)))
             val actions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
             }
-            val saveButton = button("Salvar").apply {
-                textSize = 9f
-                minHeight = dp(34)
-                setPadding(dp(2), 0, dp(2), 0)
+            val saveButton = button("SALVAR").apply {
+                textSize = 10f
+                minHeight = dp(38)
+                setPadding(dp(1), 0, dp(1), 0)
                 setOnClickListener { savePreset(index) }
             }
-            val goButton = button("Ir").apply {
-                textSize = 10f
-                minHeight = dp(34)
-                setPadding(dp(2), 0, dp(2), 0)
+            val goButton = button("IR").apply {
+                textSize = 11f
+                minHeight = dp(38)
+                setPadding(dp(1), 0, dp(1), 0)
                 setOnClickListener { moveToPreset(index) }
             }
             presetGoButtons += goButton
-            actions.addView(saveButton, LinearLayout.LayoutParams(0, dp(34), 1f).apply { rightMargin = dp(2) })
-            actions.addView(goButton, LinearLayout.LayoutParams(0, dp(34), 1f).apply { leftMargin = dp(2) })
-            presetPanel.addView(actions, LinearLayout.LayoutParams(-1, dp(38)))
+            actions.addView(saveButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(3) })
+            actions.addView(goButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(3) })
+            presetPanel.addView(actions, LinearLayout.LayoutParams(-1, dp(42)))
             if (index < PRESET_COUNT - 1) presetPanel.addView(android.view.View(this).apply {
                 setBackgroundColor(0xFF314653.toInt())
             }, LinearLayout.LayoutParams(-1, dp(1)).apply {
@@ -355,7 +368,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 bottomMargin = dp(5)
             })
         }
-        controlArea.addView(presetPanel, LinearLayout.LayoutParams(dp(112), -1))
+        controlArea.addView(presetPanel, LinearLayout.LayoutParams(dp(136), -1))
         root.addView(controlArea, LinearLayout.LayoutParams(-1, 0, 1f))
 
         setContentView(root)
@@ -699,6 +712,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         private const val JOYSTICK_PERIOD_MS = 100L
         private const val BLE_PERMISSION_REQUEST = 2401
         private const val PRESET_PREFS = "smooth4_position_presets_test"
+        private const val PREF_KEY_PAN_INVERTED = "manual_pan_inverted"
         private const val PRESET_COUNT = 3
         private const val PRESET_CONTROL_PERIOD_MS = 100L
         private const val MAX_PRESET_DURATION_MS = 12_000L
