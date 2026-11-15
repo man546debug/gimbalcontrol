@@ -752,13 +752,13 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         private const val PREF_KEY_TILT_INVERTED = "manual_tilt_inverted"
         private const val PRESET_COUNT = 3
         private const val PRESET_CONTROL_PERIOD_MS = 100L
-        private const val MAX_PRESET_DURATION_MS = 8_000L
+        private const val MAX_PRESET_DURATION_MS = 12_000L
         private const val PRESET_SETTLED_SAMPLES = 3
         private const val PRESET_TOLERANCE_DEGREES = 4f
         private const val PRESET_PAN_GAIN = 0.012f
         private const val PRESET_TILT_GAIN = 0.012f
-        private const val PRESET_MIN_SPEED = 0.04f
-        private const val PRESET_MAX_SPEED = 0.20f
+        private const val PRESET_MIN_SPEED = 0.07f
+        private const val PRESET_MAX_SPEED = 0.30f
     }
 }
 
