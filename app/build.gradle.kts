@@ -11,8 +11,8 @@ android {
         applicationId = "br.com.manfredini.smoothq4remote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.9.1-teste"
+        versionCode = 13
+        versionName = "0.9.2-teste"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
