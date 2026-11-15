@@ -170,7 +170,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             gravity = Gravity.CENTER_VERTICAL
         }
         val title = TextView(this).apply {
-            text = "SMOOTH 4 TESTE 0.9.1"
+            text = "SMOOTH 4 TESTE 0.9.2"
             textSize = 20f
             setTextColor(0xFFFFFFFF.toInt())
             typeface = android.graphics.Typeface.DEFAULT_BOLD
