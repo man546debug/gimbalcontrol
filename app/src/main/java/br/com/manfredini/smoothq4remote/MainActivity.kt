@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private var joyY = 0f
     private var sensitivity = DEFAULT_SENSITIVITY
     private var panInverted = false
+    private var tiltInverted = false
     private var xAxisLocked = false
     private var yAxisLocked = false
     private var motionLoopActive = false
@@ -88,7 +89,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 val pan = if (panInverted) -rawPan else rawPan
                 // The joystick's positive vertical command points the camera down;
                 // elevation error has the opposite sign.
-                val tilt = if (yAxisLocked) 0f else proportionalCommand(-pitchError, PRESET_TILT_GAIN)
+                val rawTilt = if (yAxisLocked) 0f else proportionalCommand(-pitchError, PRESET_TILT_GAIN)
+                val tilt = if (tiltInverted) -rawTilt else rawTilt
                 val allowedPan = if (xAxisLocked) 0f else pan
                 gimbalService?.sendAxes(allowedPan, tilt)
             }
@@ -114,7 +116,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
                 val panValue = axisInput(if (xAxisLocked) 0f else joyX)
                 val pan = if (panInverted) -panValue else panValue
                 // JoystickView reports screen coordinates: positive Y is downward.
-                val tilt = axisInput(if (yAxisLocked) 0f else joyY)
+                val tiltInput = axisInput(if (yAxisLocked) 0f else joyY)
+                val tilt = if (tiltInverted) -tiltInput else tiltInput
                 // Zhiyun joystick frames carry both axes; keep the inactive axis centered.
                 gimbalService?.sendAxes(pan, tilt)
             }
@@ -128,7 +131,9 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         window.navigationBarColor = 0xFF101820.toInt()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         poseTracker = PhonePoseTracker(this)
-        panInverted = getSharedPreferences(PRESET_PREFS, MODE_PRIVATE).getBoolean(PREF_KEY_PAN_INVERTED, false)
+        val preferences = getSharedPreferences(PRESET_PREFS, MODE_PRIVATE)
+        panInverted = preferences.getBoolean(PREF_KEY_PAN_INVERTED, false)
+        tiltInverted = preferences.getBoolean(PREF_KEY_TILT_INVERTED, false)
         buildInterface()
         requestBlePermissions()
     }
@@ -240,25 +245,46 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         }
         root.addView(sensitivityBar, LinearLayout.LayoutParams(-1, dp(52)))
 
-        val testControls = LinearLayout(this).apply {
+        val directionControls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         panDirectionButton = button(panDirectionLabel()).apply {
             setBackgroundColor(if (panInverted) 0xFF176B70.toInt() else 0xFF244254.toInt())
+            contentDescription = "Inverter o sentido do pan horizontal, eixo X"
         }
         panDirectionButton.setOnClickListener {
             stopJoystick()
             panInverted = !panInverted
-            panDirectionButton.text = panDirectionLabel()
-            panDirectionButton.setBackgroundColor(if (panInverted) 0xFF176B70.toInt() else 0xFF244254.toInt())
-            getSharedPreferences(PRESET_PREFS, MODE_PRIVATE).edit().putBoolean(PREF_KEY_PAN_INVERTED, panInverted).apply()
-            android.widget.Toast.makeText(this, if (panInverted) "Pan invertido" else "Pan normal", android.widget.Toast.LENGTH_SHORT).show()
-            showStatus(if (panInverted) "Pan invertido: esquerda e direita trocadas." else "Pan normal: sentido padrão.")
+            updateDirectionButtons()
+            getSharedPreferences(PRESET_PREFS, MODE_PRIVATE).edit()
+                .putBoolean(PREF_KEY_PAN_INVERTED, panInverted).apply()
+            showStatus(if (panInverted) "Sentido do pan X invertido." else "Sentido do pan X normal.")
         }
-        testControls.addView(panDirectionButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+        directionControls.addView(panDirectionButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
             rightMargin = dp(4)
         })
+        tiltDirectionButton = button(tiltDirectionLabel()).apply {
+            setBackgroundColor(if (tiltInverted) 0xFF176B70.toInt() else 0xFF244254.toInt())
+            contentDescription = "Inverter o sentido do tilt vertical, eixo Y"
+        }
+        tiltDirectionButton.setOnClickListener {
+            stopJoystick()
+            tiltInverted = !tiltInverted
+            updateDirectionButtons()
+            getSharedPreferences(PRESET_PREFS, MODE_PRIVATE).edit()
+                .putBoolean(PREF_KEY_TILT_INVERTED, tiltInverted).apply()
+            showStatus(if (tiltInverted) "Sentido do tilt Y invertido." else "Sentido do tilt Y normal.")
+        }
+        directionControls.addView(tiltDirectionButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+            leftMargin = dp(4)
+        })
+        root.addView(directionControls, LinearLayout.LayoutParams(-1, dp(44)))
+
+        val axisLockControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         xLockButton = button(xAxisLockLabel())
         xLockButton.contentDescription = "Travar ou destravar o eixo X, pan horizontal"
         xLockButton.setOnClickListener {
@@ -268,8 +294,8 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             stopIfAllMovingAxesAreLockedOrCentered()
             showStatus(if (xAxisLocked) "Eixo X travado; Y continua livre." else "Eixo X liberado.")
         }
-        testControls.addView(xLockButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
-            leftMargin = dp(4)
+        axisLockControls.addView(xLockButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+            rightMargin = dp(4)
         })
         yLockButton = button(yAxisLockLabel())
         yLockButton.contentDescription = "Travar ou destravar o eixo Y, tilt vertical"
@@ -280,10 +306,10 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
             stopIfAllMovingAxesAreLockedOrCentered()
             showStatus(if (yAxisLocked) "Eixo Y travado; X continua livre." else "Eixo Y liberado.")
         }
-        testControls.addView(yLockButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+        axisLockControls.addView(yLockButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
             leftMargin = dp(4)
         })
-        root.addView(testControls, LinearLayout.LayoutParams(-1, dp(50)).apply {
+        root.addView(axisLockControls, LinearLayout.LayoutParams(-1, dp(44)).apply {
             bottomMargin = dp(2)
         })
 
@@ -665,7 +691,16 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         }
     }
 
-    private fun panDirectionLabel() = if (panInverted) "Pan invertido" else "Pan normal"
+    private fun updateDirectionButtons() {
+        panDirectionButton.text = panDirectionLabel()
+        panDirectionButton.setBackgroundColor(if (panInverted) 0xFF176B70.toInt() else 0xFF244254.toInt())
+        tiltDirectionButton.text = tiltDirectionLabel()
+        tiltDirectionButton.setBackgroundColor(if (tiltInverted) 0xFF176B70.toInt() else 0xFF244254.toInt())
+    }
+
+    private fun panDirectionLabel() = if (panInverted) "Pan X invertido" else "Pan X normal"
+
+    private fun tiltDirectionLabel() = if (tiltInverted) "Tilt Y invertido" else "Tilt Y normal"
 
     private fun xAxisLockLabel() = if (xAxisLocked) "X travado" else "Travar X"
 
@@ -713,15 +748,16 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
         private const val BLE_PERMISSION_REQUEST = 2401
         private const val PRESET_PREFS = "smooth4_position_presets_test"
         private const val PREF_KEY_PAN_INVERTED = "manual_pan_inverted"
+        private const val PREF_KEY_TILT_INVERTED = "manual_tilt_inverted"
         private const val PRESET_COUNT = 3
         private const val PRESET_CONTROL_PERIOD_MS = 100L
-        private const val MAX_PRESET_DURATION_MS = 12_000L
+        private const val MAX_PRESET_DURATION_MS = 8_000L
         private const val PRESET_SETTLED_SAMPLES = 3
-        private const val PRESET_TOLERANCE_DEGREES = 3f
+        private const val PRESET_TOLERANCE_DEGREES = 4f
         private const val PRESET_PAN_GAIN = 0.012f
         private const val PRESET_TILT_GAIN = 0.012f
-        private const val PRESET_MIN_SPEED = 0.07f
-        private const val PRESET_MAX_SPEED = 0.30f
+        private const val PRESET_MIN_SPEED = 0.04f
+        private const val PRESET_MAX_SPEED = 0.20f
     }
 }
 
