@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity(), SmoothQ4BleClient.Listener {
     private lateinit var statusView: TextView
     private lateinit var sensitivityValue: TextView
     private lateinit var panDirectionButton: Button
+    private lateinit var tiltDirectionButton: Button
     private lateinit var xLockButton: Button
     private lateinit var yLockButton: Button
     private lateinit var poseTracker: PhonePoseTracker
